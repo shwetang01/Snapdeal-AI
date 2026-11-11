@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SELLER_DATA, COMPUTED } from '@/lib/seller-data';
+import { KAMName } from '@/lib/system-prompt';
 import {
   Mic,
   MicOff,
@@ -17,6 +18,9 @@ import {
   Key,
   ShieldCheck,
   CheckCircle2,
+  User,
+  Settings,
+  Play,
 } from 'lucide-react';
 
 type Message = { role: 'user' | 'assistant'; content: string; timestamp?: string };
@@ -32,9 +36,17 @@ export default function VoiceBot() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
   const [hasVoiceSupport, setHasVoiceSupport] = useState(true);
   const [showMetricsDrawer, setShowMetricsDrawer] = useState(true);
+
+  // Persona: Priya (Female) or Rahul (Male)
+  const [persona, setPersona] = useState<KAMName>('Priya');
+
+  // Available browser speech voices and selected voice URI
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
 
   const messagesRef = useRef<Message[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -51,11 +63,65 @@ export default function VoiceBot() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, botState]);
 
-  // Load custom API key from localStorage if saved
+  // Helper to identify if a voice is typically female
+  const isFemaleVoice = (v: SpeechSynthesisVoice): boolean => {
+    const name = v.name.toLowerCase();
+    const maleNames = ['ravi', 'david', 'mark', 'george', 'guy', 'prabhat', 'male', 'man', 'stefan', 'cosimo'];
+    if (maleNames.some((m) => name.includes(m))) return false;
+
+    const femaleKeywords = [
+      'female', 'woman', 'zira', 'heera', 'neerja', 'jenny', 'aria',
+      'samantha', 'victoria', 'karen', 'sonia', 'swara', 'sangeeta'
+    ];
+    return femaleKeywords.some((f) => name.includes(f));
+  };
+
+  // Helper to identify if a voice is typically male
+  const isMaleVoice = (v: SpeechSynthesisVoice): boolean => {
+    const name = v.name.toLowerCase();
+    const maleKeywords = ['ravi', 'david', 'mark', 'george', 'guy', 'prabhat', 'male', 'man'];
+    return maleKeywords.some((m) => name.includes(m));
+  };
+
+  // Populate browser voices and auto-select based on persona
+  const loadVoices = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return;
+
+    setAvailableVoices(voices);
+
+    // Pick voice according to current persona if none manually selected or when persona changes
+    const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
+
+    if (persona === 'Priya') {
+      // Prioritize explicit female voices: Indian female first, then Windows Zira / Chrome Female
+      const indianFemale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v));
+      const anyFemale = englishVoices.find((v) => isFemaleVoice(v));
+      const windowsZira = englishVoices.find((v) => v.name.toLowerCase().includes('zira'));
+      const fallbackNonMale = englishVoices.find((v) => !isMaleVoice(v));
+
+      const chosen = indianFemale || anyFemale || windowsZira || fallbackNonMale || voices[0];
+      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+    } else {
+      // Rahul: Prioritize Indian male (e.g. Ravi, Prabhat), then David/Mark
+      const indianMale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v));
+      const anyMale = englishVoices.find((v) => isMaleVoice(v));
+      const chosen = indianMale || anyMale || voices[0];
+      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+    }
+  }, [persona]);
+
+  // Pre-load browser voices on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedKey = localStorage.getItem('snapdeal_gemini_key');
       if (savedKey) setCustomApiKey(savedKey);
+
+      const savedPersona = localStorage.getItem('snapdeal_persona') as KAMName | null;
+      if (savedPersona === 'Rahul' || savedPersona === 'Priya') {
+        setPersona(savedPersona);
+      }
 
       // Check SpeechRecognition browser support
       const SR =
@@ -65,75 +131,127 @@ export default function VoiceBot() {
         setHasVoiceSupport(false);
       }
 
-      // Pre-load browser voices on mount
+      loadVoices();
       if (window.speechSynthesis) {
-        window.speechSynthesis.getVoices();
-        window.speechSynthesis.onvoiceschanged = () => {
-          window.speechSynthesis.getVoices();
-        };
+        window.speechSynthesis.onvoiceschanged = loadVoices;
       }
     }
-  }, []);
+  }, [loadVoices]);
+
+  // When persona changes, re-select appropriate voice
+  const handlePersonaChange = (newPersona: KAMName) => {
+    setPersona(newPersona);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('snapdeal_persona', newPersona);
+    }
+    // Re-pick best voice for new persona
+    const voices = availableVoices.length > 0 ? availableVoices : (typeof window !== 'undefined' ? window.speechSynthesis?.getVoices() || [] : []);
+    const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
+
+    if (newPersona === 'Priya') {
+      const indianFemale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v));
+      const anyFemale = englishVoices.find((v) => isFemaleVoice(v));
+      const windowsZira = englishVoices.find((v) => v.name.toLowerCase().includes('zira'));
+      const fallbackNonMale = englishVoices.find((v) => !isMaleVoice(v));
+      const chosen = indianFemale || anyFemale || windowsZira || fallbackNonMale || voices[0];
+      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+    } else {
+      const indianMale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v));
+      const anyMale = englishVoices.find((v) => isMaleVoice(v));
+      const chosen = indianMale || anyMale || voices[0];
+      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+    }
+  };
 
   /** Convert text to speech using browser SpeechSynthesis API */
-  const speakText = useCallback((text: string): Promise<void> => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined' || !window.speechSynthesis) {
-        resolve();
-        return;
-      }
+  const speakText = useCallback(
+    (text: string): Promise<void> => {
+      return new Promise((resolve) => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) {
+          resolve();
+          return;
+        }
 
-      setBotState('speaking');
-      setStatusText('Priya is speaking...');
+        setBotState('speaking');
+        setStatusText(`${persona} is speaking...`);
 
-      window.speechSynthesis.cancel(); // stop any leftover speech
+        window.speechSynthesis.cancel(); // stop any leftover speech
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-IN';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.05;
-      utterance.volume = 1.0;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-IN';
+        utterance.rate = 0.95;
+        // Slightly higher pitch for female (Priya), slightly deeper for male (Rahul)
+        utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
+        utterance.volume = 1.0;
 
-      // Pick the best natural-sounding Indian/English female voice available
-      const voices = window.speechSynthesis.getVoices();
-      const femaleVoice = voices.find(
-        (v) =>
-          (v.lang === 'en-IN' || v.lang.startsWith('en')) &&
-          (v.name.includes('Heera') ||
-            v.name.includes('Neerja') ||
-            v.name.includes('India') ||
-            v.name.includes('Google UK English Female') ||
-            v.name.includes('Samantha') ||
-            v.name.includes('Victoria') ||
-            v.name.includes('Karen') ||
-            v.name.toLowerCase().includes('female'))
-      );
-      if (femaleVoice) {
-        utterance.voice = femaleVoice;
-      }
+        // Apply selected voice
+        const voices = window.speechSynthesis.getVoices();
+        let targetVoice = voices.find((v) => v.voiceURI === selectedVoiceURI);
 
-      utterance.onend = () => {
-        setBotState('idle');
-        setStatusText('Your turn — tap the mic to speak');
-        resolve();
-      };
+        if (!targetVoice) {
+          const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
+          if (persona === 'Priya') {
+            targetVoice =
+              englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v)) ||
+              englishVoices.find((v) => isFemaleVoice(v)) ||
+              englishVoices.find((v) => v.name.toLowerCase().includes('zira')) ||
+              englishVoices.find((v) => !isMaleVoice(v));
+          } else {
+            targetVoice =
+              englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v)) ||
+              englishVoices.find((v) => isMaleVoice(v));
+          }
+        }
 
-      utterance.onerror = (e) => {
-        console.warn('SpeechSynthesis error:', e);
-        setBotState('idle');
-        setStatusText('Your turn — tap the mic to speak');
-        resolve();
-      };
+        if (targetVoice) {
+          utterance.voice = targetVoice;
+        }
 
-      window.speechSynthesis.speak(utterance);
-    });
-  }, []);
+        utterance.onend = () => {
+          setBotState('idle');
+          setStatusText('Your turn — tap the mic to speak');
+          resolve();
+        };
+
+        utterance.onerror = (e) => {
+          console.warn('SpeechSynthesis error:', e);
+          setBotState('idle');
+          setStatusText('Your turn — tap the mic to speak');
+          resolve();
+        };
+
+        window.speechSynthesis.speak(utterance);
+      });
+    },
+    [persona, selectedVoiceURI]
+  );
+
+  /** Test the current voice setting */
+  const testVoice = (voiceURI?: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const uriToUse = voiceURI || selectedVoiceURI;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find((v) => v.voiceURI === uriToUse);
+
+    const testPhrase =
+      persona === 'Priya'
+        ? "Hello Rajesh! I am Priya, your Snapdeal Virtual KAM. How can I help improve your sales today?"
+        : "Hello Rajesh! I am Rahul, your Snapdeal Virtual KAM. How can I help improve your sales today?";
+
+    const utterance = new SpeechSynthesisUtterance(testPhrase);
+    utterance.lang = 'en-IN';
+    utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
+    utterance.rate = 0.95;
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.speak(utterance);
+  };
 
   /** Send conversation history to /api/chat */
   const askChat = useCallback(
     async (msgs: Message[]): Promise<string> => {
       setBotState('processing');
-      setStatusText('Priya is analyzing your account...');
+      setStatusText(`${persona} is analyzing your account...`);
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -141,6 +259,7 @@ export default function VoiceBot() {
         body: JSON.stringify({
           messages: msgs,
           apiKey: customApiKey || undefined,
+          assistantName: persona,
         }),
       });
 
@@ -152,10 +271,10 @@ export default function VoiceBot() {
       const data = await res.json();
       return data.text as string;
     },
-    [customApiKey]
+    [customApiKey, persona]
   );
 
-  /** Start the conversation — trigger Priya's opening greeting */
+  /** Start the conversation — trigger KAM opening greeting */
   const startConversation = useCallback(async () => {
     setIsStarted(true);
     setErrorMsg(null);
@@ -172,9 +291,7 @@ export default function VoiceBot() {
       await speakText(botText);
     } catch (err: unknown) {
       console.error(err);
-      setErrorMsg(
-        'Could not initialize call. Please check your network or Gemini API key.'
-      );
+      setErrorMsg('Could not initialize call. Please check your network or Gemini API key.');
       setBotState('error');
       setIsStarted(false);
     }
@@ -280,7 +397,7 @@ export default function VoiceBot() {
       setBotState('idle');
       setStatusText('Listening paused. Tap mic to resume.');
     } else if (botState === 'speaking') {
-      // Allow user to interrupt Priya
+      // Allow user to interrupt
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -378,6 +495,7 @@ export default function VoiceBot() {
 
   const currStyle = statusStyle[botState];
   const visibleMessages = messages.filter((m) => m.content !== TRIGGER);
+  const activeAvatar = persona === 'Priya' ? '👩‍💼' : '👨‍💼';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 via-slate-50 to-orange-50 flex flex-col items-center py-6 px-4 sm:px-6">
@@ -401,25 +519,65 @@ export default function VoiceBot() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Quick Voice & Persona Toggle */}
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm text-xs">
+            <button
+              type="button"
+              onClick={() => handlePersonaChange('Priya')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold transition ${
+                persona === 'Priya'
+                  ? 'bg-rose-500 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Female Voice KAM"
+            >
+              <span>👩‍💼</span>
+              <span>Priya</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePersonaChange('Rahul')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold transition ${
+                persona === 'Rahul'
+                  ? 'bg-slate-800 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Male Voice KAM"
+            >
+              <span>👨‍💼</span>
+              <span>Rahul</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setVoiceSettingsOpen(true)}
+            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
+            title="Configure Speech Voices"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Voice Settings</span>
+          </button>
+
           <button
             onClick={() => setShowMetricsDrawer(!showMetricsDrawer)}
             className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
           >
             <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
-            <span>{showMetricsDrawer ? 'Hide Seller Data' : 'View Seller Data'}</span>
+            <span className="hidden sm:inline">{showMetricsDrawer ? 'Hide Data' : 'View Data'}</span>
           </button>
+
           <button
             onClick={() => setApiKeyModalOpen(true)}
             className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
             title="Configure Gemini API Key"
           >
             <Key className="w-3.5 h-3.5 text-amber-500" />
-            <span>{customApiKey ? 'API Key Configured' : 'Set API Key'}</span>
+            <span className="hidden sm:inline">{customApiKey ? 'API Key' : 'API Key'}</span>
           </button>
         </div>
       </header>
 
-      {/* Seller Metrics Bar (Accordion / Summary) */}
+      {/* Seller Metrics Bar */}
       {showMetricsDrawer && (
         <section className="w-full max-w-4xl bg-white border border-rose-100 rounded-2xl p-4 mb-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -445,7 +603,7 @@ export default function VoiceBot() {
                 ₹{SELLER_DATA.thisMonth.sales.toLocaleString('en-IN')}
               </div>
               <div className="text-[10px] font-semibold text-rose-600 flex items-center justify-center gap-0.5 mt-0.5">
-                <span>↓ ₹{SELLER_DATA.lastMonth.sales.toLocaleString('en-IN')}</span>
+                <span>↓ was ₹{SELLER_DATA.lastMonth.sales.toLocaleString('en-IN')}</span>
                 <span className="bg-rose-100 px-1 rounded">-{COMPUTED.salesDropPct}%</span>
               </div>
             </div>
@@ -506,7 +664,7 @@ export default function VoiceBot() {
           <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center flex-1 my-auto">
             <div className="relative mb-6">
               <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gradient-to-tr from-[#e40046] via-rose-500 to-orange-400 flex items-center justify-center text-white shadow-xl shadow-rose-200">
-                <span className="text-5xl font-light">👩‍💼</span>
+                <span className="text-5xl font-light">{activeAvatar}</span>
               </div>
               <span className="absolute bottom-1 right-1 w-6 h-6 bg-emerald-500 border-4 border-white rounded-full flex items-center justify-center">
                 <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
@@ -517,12 +675,39 @@ export default function VoiceBot() {
               Namaste, Rajesh Sharma!
             </h1>
             <p className="text-base text-rose-600 font-semibold mt-1">
-              Priya &bull; Virtual Key Account Manager
+              {persona} &bull; Virtual Key Account Manager ({persona === 'Priya' ? 'Female' : 'Male'} Voice)
             </p>
             <p className="text-sm text-slate-500 max-w-md mx-auto mt-3 leading-relaxed">
               I noticed your sales dipped from ₹2,00,000 to ₹1,35,000 this month. Start an instant
               voice call to diagnose root causes and get personalized recovery steps.
             </p>
+
+            {/* Persona Switch Pills */}
+            <div className="mt-4 flex items-center gap-2 justify-center">
+              <span className="text-xs text-slate-400 font-medium">Assistant Persona:</span>
+              <button
+                type="button"
+                onClick={() => handlePersonaChange('Priya')}
+                className={`text-xs px-3 py-1 rounded-full font-semibold border transition ${
+                  persona === 'Priya'
+                    ? 'bg-rose-50 border-rose-300 text-rose-700 ring-2 ring-rose-200'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                👩‍💼 Priya (Female Voice)
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePersonaChange('Rahul')}
+                className={`text-xs px-3 py-1 rounded-full font-semibold border transition ${
+                  persona === 'Rahul'
+                    ? 'bg-slate-100 border-slate-400 text-slate-900 ring-2 ring-slate-200'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                👨‍💼 Rahul (Male Voice)
+              </button>
+            </div>
 
             {/* Quick Scenario prompt helper */}
             <div className="mt-6 mb-8 inline-flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-xs text-slate-600">
@@ -537,7 +722,7 @@ export default function VoiceBot() {
               className="group relative inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-[#e40046] hover:bg-[#c1003b] active:scale-95 text-white font-bold text-lg shadow-lg shadow-rose-300 hover:shadow-xl transition-all duration-200"
             >
               <Phone className="w-5 h-5 group-hover:rotate-12 transition-transform duration-300" />
-              <span>Start Voice Call with Priya</span>
+              <span>Start Voice Call with {persona}</span>
             </button>
 
             {!hasVoiceSupport && (
@@ -570,15 +755,15 @@ export default function VoiceBot() {
                       botState === 'speaking' ? 'scale-110 ring-4 ring-white/40' : ''
                     }`}
                   >
-                    👩‍💼
+                    {activeAvatar}
                   </div>
                   <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-400 border-2 border-[#e40046] rounded-full"></span>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold leading-none">Priya</h3>
+                    <h3 className="text-base font-bold leading-none">{persona}</h3>
                     <span className="text-[10px] font-semibold bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Live Voice Call
+                      Live Voice Call ({persona === 'Priya' ? 'Female' : 'Male'})
                     </span>
                   </div>
                   <p className="text-xs text-rose-100 mt-1">
@@ -588,6 +773,14 @@ export default function VoiceBot() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setVoiceSettingsOpen(true)}
+                  className="inline-flex items-center gap-1 bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition border border-white/20"
+                  title="Change voice"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Voice</span>
+                </button>
                 <button
                   onClick={handleEndCall}
                   className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-semibold px-3 py-2 rounded-xl transition border border-white/20"
@@ -603,7 +796,7 @@ export default function VoiceBot() {
               {visibleMessages.length === 0 && (
                 <div className="text-center text-slate-400 text-xs py-12 flex flex-col items-center gap-2">
                   <div className="w-8 h-8 rounded-full border-2 border-rose-300 border-t-transparent animate-spin"></div>
-                  <span>Connecting with Priya...</span>
+                  <span>Connecting with {persona}...</span>
                 </div>
               )}
 
@@ -625,7 +818,7 @@ export default function VoiceBot() {
                           msg.role === 'user' ? 'text-rose-200' : 'text-rose-600'
                         }`}
                       >
-                        {msg.role === 'user' ? 'Rajesh Sharma (You)' : 'Priya (Snapdeal KAM)'}
+                        {msg.role === 'user' ? 'Rajesh Sharma (You)' : `${persona} (Snapdeal KAM)`}
                       </span>
                       {msg.timestamp && (
                         <span
@@ -646,7 +839,7 @@ export default function VoiceBot() {
               {botState === 'speaking' && (
                 <div className="flex justify-start items-center gap-2 text-xs text-indigo-600 pl-2">
                   <Volume2 className="w-4 h-4 animate-bounce" />
-                  <span className="font-medium">Priya is speaking via text-to-speech...</span>
+                  <span className="font-medium">{persona} is speaking via text-to-speech...</span>
                 </div>
               )}
 
@@ -664,7 +857,7 @@ export default function VoiceBot() {
               <div ref={bottomRef} />
             </div>
 
-            {/* Quick Speech Suggestions (Click to speak) */}
+            {/* Quick Speech Suggestions */}
             <div className="bg-white/80 border-t border-slate-100 px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs">
               <span className="text-slate-400 font-medium whitespace-nowrap text-[11px]">
                 Suggested questions:
@@ -672,7 +865,6 @@ export default function VoiceBot() {
               <button
                 onClick={() => {
                   setTextInput("My sales dropped significantly this month. Can you help me?");
-                  // Directly ask
                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                   setTimeout(() => handleTextSubmit(fakeEvent), 50);
                 }}
@@ -754,7 +946,7 @@ export default function VoiceBot() {
                     botState === 'listening'
                       ? 'Click to stop listening'
                       : botState === 'speaking'
-                      ? 'Click to interrupt Priya'
+                      ? `Click to interrupt ${persona}`
                       : 'Click to speak'
                   }
                 >
@@ -772,7 +964,7 @@ export default function VoiceBot() {
                     {botState === 'listening'
                       ? 'Listening...'
                       : botState === 'speaking'
-                      ? 'Priya Speaking'
+                      ? `${persona} Speaking`
                       : 'Tap to Speak'}
                   </p>
                   <p className="text-[10px] text-slate-500">
@@ -782,16 +974,13 @@ export default function VoiceBot() {
               </div>
 
               {/* Text Input Fallback (for accessibility or testing) */}
-              <form
-                onSubmit={handleTextSubmit}
-                className="flex-1 flex items-center gap-2 w-full"
-              >
+              <form onSubmit={handleTextSubmit} className="flex-1 flex items-center gap-2 w-full">
                 <div className="relative flex-1">
                   <input
                     type="text"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Speak via mic or type seller question here..."
+                    placeholder={`Speak via mic or type question for ${persona}...`}
                     disabled={botState === 'processing'}
                     className="w-full text-xs sm:text-sm pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 rounded-xl outline-none transition"
                   />
@@ -824,6 +1013,113 @@ export default function VoiceBot() {
         <span>Snapdeal AI First Intern Assignment &bull; Mini AI Voice KAM</span>
         <span>Built with Next.js 14, Google Gemini, Web Speech API & Tailwind CSS</span>
       </footer>
+
+      {/* Voice & Persona Settings Modal */}
+      {voiceSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <Volume2 className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-base">Voice & Persona Settings</h3>
+              </div>
+              <button
+                onClick={() => setVoiceSettingsOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Persona Switch */}
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-700 mb-2">
+                Assistant Persona & Gender
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePersonaChange('Priya')}
+                  className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition ${
+                    persona === 'Priya'
+                      ? 'border-rose-400 bg-rose-50/70 text-rose-900 ring-2 ring-rose-200'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="text-2xl">👩‍💼</span>
+                  <span className="text-xs font-bold">Priya</span>
+                  <span className="text-[10px] text-rose-600 font-medium">Female Voice KAM</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePersonaChange('Rahul')}
+                  className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition ${
+                    persona === 'Rahul'
+                      ? 'border-slate-800 bg-slate-100 text-slate-900 ring-2 ring-slate-300'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="text-2xl">👨‍💼</span>
+                  <span className="text-xs font-bold">Rahul</span>
+                  <span className="text-[10px] text-slate-600 font-medium">Male Voice KAM</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Specific Voice Picker */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-700">
+                  Synthesizer Voice ({availableVoices.length} detected)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => testVoice()}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
+                >
+                  <Play className="w-3 h-3 fill-indigo-600" /> Test Voice
+                </button>
+              </div>
+
+              <select
+                value={selectedVoiceURI}
+                onChange={(e) => {
+                  setSelectedVoiceURI(e.target.value);
+                  testVoice(e.target.value);
+                }}
+                className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-rose-400 focus:outline-none"
+              >
+                {availableVoices.map((v) => {
+                  const isFem = isFemaleVoice(v);
+                  const isM = isMaleVoice(v);
+                  const labelGender = isFem ? '👩 Female' : isM ? '👨 Male' : '🗣️';
+                  return (
+                    <option key={v.voiceURI} value={v.voiceURI}>
+                      {labelGender} {v.name} ({v.lang})
+                    </option>
+                  );
+                })}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Tip: Microsoft Zira or Heera / Neerja provide great female speech on Windows; Microsoft Ravi or David provide male speech.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setVoiceSettingsOpen(false)}
+                className="text-xs px-4 py-2 bg-[#e40046] hover:bg-[#c1003b] text-white font-semibold rounded-lg shadow-sm transition"
+              >
+                Save & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* API Key Modal */}
       {apiKeyModalOpen && (
@@ -896,4 +1192,3 @@ export default function VoiceBot() {
     </div>
   );
 }
-

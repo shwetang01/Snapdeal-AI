@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getSystemPrompt } from '@/lib/system-prompt';
+import { getSystemPrompt, KAMName } from '@/lib/system-prompt';
 
 // Rule-based fallback conversational brain in case Gemini API key is missing or invalid
-function getDeterministicResponse(messages: { role: string; content: string }[]): string {
+function getDeterministicResponse(
+  messages: { role: string; content: string }[],
+  assistantName: KAMName = 'Priya'
+): string {
   const lastMsg = (messages[messages.length - 1]?.content || '').toLowerCase();
   const historyText = messages.map((m) => m.content.toLowerCase()).join(' ');
+  const name = assistantName === 'Rahul' ? 'Rahul' : 'Priya';
 
   if (lastMsg.includes('[call_started]') || messages.length <= 1) {
-    return "Hello Rajesh! This is Priya calling from Snapdeal. I'm really glad you reached out, as I can already see some concerning changes in your store performance this month. What has been worrying you the most?";
+    return `Hello Rajesh! This is ${name} calling from Snapdeal. I'm really glad you reached out, as I can already see some concerning changes in your store performance this month. What has been worrying you the most?`;
   }
 
   if (
@@ -75,12 +79,20 @@ function getDeterministicResponse(messages: { role: string; content: string }[])
 }
 
 export async function POST(req: NextRequest) {
+  let activeAssistantName: KAMName = 'Priya';
   try {
     const body = await req.json();
-    const { messages, apiKey: clientApiKey } = body as {
+    const {
+      messages,
+      apiKey: clientApiKey,
+      assistantName,
+    } = body as {
       messages: { role: 'user' | 'assistant'; content: string }[];
       apiKey?: string;
+      assistantName?: KAMName;
     };
+
+    if (assistantName === 'Rahul') activeAssistantName = 'Rahul';
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: 'Messages array is required' }, { status: 400 });
@@ -90,10 +102,11 @@ export async function POST(req: NextRequest) {
 
     // If no API key is provided, use deterministic fallback with high accuracy
     if (!apiKey || apiKey.trim() === '' || apiKey.includes('your-google-gemini-api-key-here')) {
-      const fallbackReply = getDeterministicResponse(messages);
+      const fallbackReply = getDeterministicResponse(messages, activeAssistantName);
       return NextResponse.json({
         text: fallbackReply,
         source: 'deterministic-fallback',
+        assistantName: activeAssistantName,
         note: 'Using built-in dialog engine. Add GEMINI_API_KEY in .env.local for live Gemini AI calls.',
       });
     }
@@ -103,7 +116,7 @@ export async function POST(req: NextRequest) {
 
     const model = genAI.getGenerativeModel({
       model: modelName,
-      systemInstruction: getSystemPrompt(),
+      systemInstruction: getSystemPrompt(activeAssistantName),
       generationConfig: {
         maxOutputTokens: 180,
         temperature: 0.7,
@@ -111,7 +124,6 @@ export async function POST(req: NextRequest) {
     });
 
     // Format history for Gemini SDK
-    // All items except the last one constitute the chat history
     const history = messages.slice(0, -1).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }],
@@ -126,18 +138,19 @@ export async function POST(req: NextRequest) {
     // Clean any unwanted markdown asterisks or bullet formatting to guarantee natural voice
     text = text.replace(/[*#_`]/g, '').trim();
 
-    return NextResponse.json({ text, source: 'gemini' });
+    return NextResponse.json({ text, source: 'gemini', assistantName: activeAssistantName });
   } catch (error: any) {
     console.error('[chat API error]', error);
 
-    // If Gemini fails (quota limit, network timeout, model unavailable), fallback gracefully
+    // If Gemini fails, fallback gracefully
     try {
       const body = await req.json().catch(() => null);
       const messages = body?.messages || [];
-      const fallbackReply = getDeterministicResponse(messages);
+      const fallbackReply = getDeterministicResponse(messages, activeAssistantName);
       return NextResponse.json({
         text: fallbackReply,
         source: 'error-fallback',
+        assistantName: activeAssistantName,
         warning: error?.message || 'Gemini error, used fallback response',
       });
     } catch {
@@ -148,4 +161,3 @@ export async function POST(req: NextRequest) {
     }
   }
 }
-
