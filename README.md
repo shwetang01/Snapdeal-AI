@@ -8,10 +8,9 @@ Built for the **Snapdeal AI First Intern Practical Assignment**.
 
 ---
 
-## 📌 Submission Resources
+## 📌 Project Resources
 - 🚀 **GitHub Repository:** [https://github.com/shwetang01/Snapdeal-AI](https://github.com/shwetang01/Snapdeal-AI)
-- 📄 **1-Page Technical Architecture Note:** [`SUBMISSION_NOTE.md`](./SUBMISSION_NOTE.md)
-- 🎬 **Screen Recording Guide & 90-Sec Voice Script:** [`RECORDING_AND_SUBMISSION_GUIDE.md`](./RECORDING_AND_SUBMISSION_GUIDE.md)
+- 📄 **Technical Architecture & Submission Note:** [`SUBMISSION_NOTE.md`](./SUBMISSION_NOTE.md)
 
 ---
 
