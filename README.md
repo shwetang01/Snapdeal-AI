@@ -1,8 +1,17 @@
 # Snapdeal Mini AI Voice KAM (Key Account Manager)
 
-An AI-powered voice assistant built for Snapdeal sellers to diagnose sales performance drops, uncover root causes, and deliver actionable, data-driven recovery steps in a natural voice conversation.
+An autonomous AI-powered voice assistant built for Snapdeal sellers to diagnose sales performance drops, uncover root causes, and deliver actionable, data-driven recovery steps in a natural voice conversation.
 
 Built for the **Snapdeal AI First Intern Practical Assignment**.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fshwetang01%2FSnapdeal-AI)
+
+---
+
+## 📌 Submission Resources
+- 🚀 **GitHub Repository:** [https://github.com/shwetang01/Snapdeal-AI](https://github.com/shwetang01/Snapdeal-AI)
+- 📄 **1-Page Technical Architecture Note:** [`SUBMISSION_NOTE.md`](./SUBMISSION_NOTE.md)
+- 🎬 **Screen Recording Guide & 90-Sec Voice Script:** [`RECORDING_AND_SUBMISSION_GUIDE.md`](./RECORDING_AND_SUBMISSION_GUIDE.md)
 
 ---
 
