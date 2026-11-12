@@ -5,21 +5,15 @@ import { SELLER_DATA, COMPUTED } from '@/lib/seller-data';
 import { KAMName } from '@/lib/system-prompt';
 import {
   Mic,
-  MicOff,
   Phone,
   PhoneOff,
   Volume2,
   TrendingDown,
   AlertCircle,
-  PackageX,
   Sparkles,
   Send,
-  RotateCcw,
   Key,
   ShieldCheck,
-  CheckCircle2,
-  User,
-  Settings,
   Play,
 } from 'lucide-react';
 
@@ -29,6 +23,7 @@ type BotState = 'idle' | 'listening' | 'processing' | 'speaking' | 'error';
 const TRIGGER = '[CALL_STARTED]';
 
 export default function VoiceBot() {
+  const [mounted, setMounted] = useState(false);
   const [botState, setBotState] = useState<BotState>('idle');
   const [messages, setMessages] = useState<Message[]>([]);
   const [statusText, setStatusText] = useState('Click "Start Call" to begin');
@@ -83,38 +78,14 @@ export default function VoiceBot() {
     return maleKeywords.some((m) => name.includes(m));
   };
 
-  // Populate browser voices and auto-select based on persona
-  const loadVoices = useCallback(() => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const voices = window.speechSynthesis.getVoices();
-    if (!voices || voices.length === 0) return;
-
-    setAvailableVoices(voices);
-
-    // Pick voice according to current persona if none manually selected or when persona changes
-    const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
-
-    if (persona === 'Priya') {
-      // Prioritize explicit female voices: Indian female first, then Windows Zira / Chrome Female
-      const indianFemale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v));
-      const anyFemale = englishVoices.find((v) => isFemaleVoice(v));
-      const windowsZira = englishVoices.find((v) => v.name.toLowerCase().includes('zira'));
-      const fallbackNonMale = englishVoices.find((v) => !isMaleVoice(v));
-
-      const chosen = indianFemale || anyFemale || windowsZira || fallbackNonMale || voices[0];
-      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
-    } else {
-      // Rahul: Prioritize Indian male (e.g. Ravi, Prabhat), then David/Mark
-      const indianMale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v));
-      const anyMale = englishVoices.find((v) => isMaleVoice(v));
-      const chosen = indianMale || anyMale || voices[0];
-      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
-    }
-  }, [persona]);
-
-  // Pre-load browser voices on mount
+  // Initial client mount and voice discovery (runs once safely on reload)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    setMounted(true);
+
+    if (typeof window === 'undefined') return;
+
+    // Load saved preferences safely
+    try {
       const savedKey = localStorage.getItem('snapdeal_gemini_key');
       if (savedKey) setCustomApiKey(savedKey);
 
@@ -122,45 +93,91 @@ export default function VoiceBot() {
       if (savedPersona === 'Rahul' || savedPersona === 'Priya') {
         setPersona(savedPersona);
       }
-
-      // Check SpeechRecognition browser support
-      const SR =
-        (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
-        (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
-      if (!SR) {
-        setHasVoiceSupport(false);
-      }
-
-      loadVoices();
-      if (window.speechSynthesis) {
-        window.speechSynthesis.onvoiceschanged = loadVoices;
-      }
+    } catch {
+      // Ignore localStorage exceptions in private browsing
     }
-  }, [loadVoices]);
 
-  // When persona changes, re-select appropriate voice
-  const handlePersonaChange = (newPersona: KAMName) => {
-    setPersona(newPersona);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('snapdeal_persona', newPersona);
+    // Check SpeechRecognition browser support
+    const SR =
+      (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
+    if (!SR) {
+      setHasVoiceSupport(false);
     }
-    // Re-pick best voice for new persona
-    const voices = availableVoices.length > 0 ? availableVoices : (typeof window !== 'undefined' ? window.speechSynthesis?.getVoices() || [] : []);
+
+    // Flush any leftover speech from before the page reload
+    if (window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+
+      const fetchVoices = () => {
+        try {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices && voices.length > 0) {
+            setAvailableVoices(voices);
+          }
+        } catch {}
+      };
+
+      fetchVoices();
+      window.speechSynthesis.onvoiceschanged = fetchVoices;
+    }
+
+    // Clean up when unmounting or reloading
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.onvoiceschanged = null;
+        } catch {}
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+    };
+  }, []);
+
+  // Dynamically resolve the best voice for current persona
+  const getEffectiveVoice = useCallback((): SpeechSynthesisVoice | null => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+    const voices = availableVoices.length > 0 ? availableVoices : window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+
+    // 1. If user explicitly picked a voice from dropdown
+    if (selectedVoiceURI) {
+      const userChosen = voices.find((v) => v.voiceURI === selectedVoiceURI);
+      if (userChosen) return userChosen;
+    }
+
     const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
 
-    if (newPersona === 'Priya') {
+    // 2. Priya (Female Voice): Indian female first, then Windows Zira, then any female
+    if (persona === 'Priya') {
       const indianFemale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v));
       const anyFemale = englishVoices.find((v) => isFemaleVoice(v));
       const windowsZira = englishVoices.find((v) => v.name.toLowerCase().includes('zira'));
       const fallbackNonMale = englishVoices.find((v) => !isMaleVoice(v));
-      const chosen = indianFemale || anyFemale || windowsZira || fallbackNonMale || voices[0];
-      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+
+      return indianFemale || anyFemale || windowsZira || fallbackNonMale || englishVoices[0] || voices[0];
     } else {
+      // 3. Rahul (Male Voice): Indian male first (Ravi, Prabhat), then David/Mark
       const indianMale = englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v));
       const anyMale = englishVoices.find((v) => isMaleVoice(v));
-      const chosen = indianMale || anyMale || voices[0];
-      if (chosen) setSelectedVoiceURI(chosen.voiceURI);
+
+      return indianMale || anyMale || englishVoices[0] || voices[0];
     }
+  }, [availableVoices, persona, selectedVoiceURI]);
+
+  // Persona change handler
+  const handlePersonaChange = (newPersona: KAMName) => {
+    setPersona(newPersona);
+    setSelectedVoiceURI(''); // Reset manual override to auto-select best voice for new persona
+    try {
+      localStorage.setItem('snapdeal_persona', newPersona);
+    } catch {}
   };
 
   /** Convert text to speech using browser SpeechSynthesis API */
@@ -175,34 +192,18 @@ export default function VoiceBot() {
         setBotState('speaking');
         setStatusText(`${persona} is speaking...`);
 
-        window.speechSynthesis.cancel(); // stop any leftover speech
+        try {
+          window.speechSynthesis.cancel(); // stop any leftover speech
+        } catch {}
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-IN';
         utterance.rate = 0.95;
-        // Slightly higher pitch for female (Priya), slightly deeper for male (Rahul)
+        // Pitch tuning: 1.15 for female Priya, 0.95 for male Rahul
         utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
         utterance.volume = 1.0;
 
-        // Apply selected voice
-        const voices = window.speechSynthesis.getVoices();
-        let targetVoice = voices.find((v) => v.voiceURI === selectedVoiceURI);
-
-        if (!targetVoice) {
-          const englishVoices = voices.filter((v) => v.lang.startsWith('en'));
-          if (persona === 'Priya') {
-            targetVoice =
-              englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isFemaleVoice(v)) ||
-              englishVoices.find((v) => isFemaleVoice(v)) ||
-              englishVoices.find((v) => v.name.toLowerCase().includes('zira')) ||
-              englishVoices.find((v) => !isMaleVoice(v));
-          } else {
-            targetVoice =
-              englishVoices.find((v) => (v.lang === 'en-IN' || v.name.includes('India')) && isMaleVoice(v)) ||
-              englishVoices.find((v) => isMaleVoice(v));
-          }
-        }
-
+        const targetVoice = getEffectiveVoice();
         if (targetVoice) {
           utterance.voice = targetVoice;
         }
@@ -220,31 +221,38 @@ export default function VoiceBot() {
           resolve();
         };
 
-        window.speechSynthesis.speak(utterance);
+        try {
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('SpeechSynthesis speak failed:', e);
+          setBotState('idle');
+          resolve();
+        }
       });
     },
-    [persona, selectedVoiceURI]
+    [getEffectiveVoice, persona]
   );
 
-  /** Test the current voice setting */
+  /** Test current voice setting */
   const testVoice = (voiceURI?: string) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const uriToUse = voiceURI || selectedVoiceURI;
-    const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find((v) => v.voiceURI === uriToUse);
+    try {
+      window.speechSynthesis.cancel();
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voiceURI ? voices.find((v) => v.voiceURI === voiceURI) : getEffectiveVoice();
 
-    const testPhrase =
-      persona === 'Priya'
-        ? "Hello Rajesh! I am Priya, your Snapdeal Virtual KAM. How can I help improve your sales today?"
-        : "Hello Rajesh! I am Rahul, your Snapdeal Virtual KAM. How can I help improve your sales today?";
+      const testPhrase =
+        persona === 'Priya'
+          ? "Hello Rajesh! I am Priya, your Snapdeal Virtual KAM. How can I help improve your sales today?"
+          : "Hello Rajesh! I am Rahul, your Snapdeal Virtual KAM. How can I help improve your sales today?";
 
-    const utterance = new SpeechSynthesisUtterance(testPhrase);
-    utterance.lang = 'en-IN';
-    utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
-    utterance.rate = 0.95;
-    if (voice) utterance.voice = voice;
-    window.speechSynthesis.speak(utterance);
+      const utterance = new SpeechSynthesisUtterance(testPhrase);
+      utterance.lang = 'en-IN';
+      utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
+      utterance.rate = 0.95;
+      if (voice) utterance.voice = voice;
+      window.speechSynthesis.speak(utterance);
+    } catch {}
   };
 
   /** Send conversation history to /api/chat */
@@ -274,7 +282,7 @@ export default function VoiceBot() {
     [customApiKey, persona]
   );
 
-  /** Start the conversation — trigger KAM opening greeting */
+  /** Start conversation */
   const startConversation = useCallback(async () => {
     setIsStarted(true);
     setErrorMsg(null);
@@ -303,7 +311,9 @@ export default function VoiceBot() {
 
     // Stop TTS if speaking
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -393,20 +403,24 @@ export default function VoiceBot() {
     if (botState === 'idle') {
       startListening();
     } else if (botState === 'listening') {
-      recognitionRef.current?.stop();
+      try {
+        recognitionRef.current?.stop();
+      } catch {}
       setBotState('idle');
       setStatusText('Listening paused. Tap mic to resume.');
     } else if (botState === 'speaking') {
       // Allow user to interrupt
       if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
       }
       setBotState('idle');
       startListening();
     }
   };
 
-  /** Send text message (for silent testing or fallback) */
+  /** Send text message */
   const handleTextSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = textInput.trim();
@@ -439,9 +453,13 @@ export default function VoiceBot() {
   /** End current call */
   const handleEndCall = () => {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
-    recognitionRef.current?.stop();
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
     setIsStarted(false);
     setBotState('idle');
     setStatusText('Call ended. Click "Start Call" to begin a new session.');
@@ -450,15 +468,28 @@ export default function VoiceBot() {
   /** Save custom API key */
   const saveApiKey = (key: string) => {
     setCustomApiKey(key);
-    if (typeof window !== 'undefined') {
+    try {
       if (key) {
         localStorage.setItem('snapdeal_gemini_key', key);
       } else {
         localStorage.removeItem('snapdeal_gemini_key');
       }
-    }
+    } catch {}
     setApiKeyModalOpen(false);
   };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-rose-50 via-slate-50 to-orange-50 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-[#e40046] flex items-center justify-center text-white font-extrabold text-3xl shadow-lg shadow-rose-200 animate-pulse">
+            S
+          </div>
+          <p className="text-sm font-semibold text-slate-700">Connecting to Snapdeal Virtual KAM...</p>
+        </div>
+      </div>
+    );
+  }
 
   const statusStyle: Record<BotState, { bg: string; text: string; border: string; dot: string }> = {
     idle: {
@@ -1092,6 +1123,7 @@ export default function VoiceBot() {
                 }}
                 className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-rose-400 focus:outline-none"
               >
+                <option value="">Default auto-selected for {persona}</option>
                 {availableVoices.map((v) => {
                   const isFem = isFemaleVoice(v);
                   const isM = isMaleVoice(v);
@@ -1104,7 +1136,7 @@ export default function VoiceBot() {
                 })}
               </select>
               <p className="text-[10px] text-slate-400 mt-1">
-                Tip: Microsoft Zira or Heera / Neerja provide great female speech on Windows; Microsoft Ravi or David provide male speech.
+                Tip: Microsoft Zira or Heera / Neerja provide female speech; Microsoft Ravi or David provide male speech.
               </p>
             </div>
 
