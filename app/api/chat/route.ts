@@ -226,31 +226,53 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Call Google Gemini with function calling
+    // Call Google Gemini with dynamic function calling & multi-model fallback
     const genAI = new GoogleGenerativeAI(apiKey);
-    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      systemInstruction: getSystemPrompt(activeAssistantName, activeSellerId),
-      tools,
-      generationConfig: {
-        maxOutputTokens: 220,
-        temperature: 0.7,
-      },
-    });
+    const candidateModels = [
+      process.env.GEMINI_MODEL,
+      'gemini-2.0-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash',
+      'gemini-pro',
+    ].filter(Boolean) as string[];
 
     // Format chat history, alternating user and model
     const history = incomingMessages.slice(0, -1).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }],
     }));
-
-    const chat = model.startChat({ history });
     const lastMsg = incomingMessages[incomingMessages.length - 1];
 
-    let result = await chat.sendMessage(lastMsg.content);
-    let candidate = result.response;
+    let activeChat: any = null;
+    let candidate: any = null;
+    let lastError: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: getSystemPrompt(activeAssistantName, activeSellerId),
+          tools,
+          generationConfig: {
+            maxOutputTokens: 220,
+            temperature: 0.7,
+          },
+        });
+
+        const chat = model.startChat({ history });
+        const result = await chat.sendMessage(lastMsg.content);
+        candidate = result.response;
+        activeChat = chat;
+        break; // Successfully connected with active model!
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Gemini model ${modelName} warning]:`, err?.message || err);
+      }
+    }
+
+    if (!candidate || !activeChat) {
+      throw lastError || new Error('No candidate Gemini model succeeded');
+    }
 
     // Handle function calls loop (Gemini calling tools)
     let functionCalls = candidate.functionCalls();
@@ -282,8 +304,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Send tool results back to Gemini
-      result = await chat.sendMessage(functionResponses);
-      candidate = result.response;
+      const toolResult = await activeChat.sendMessage(functionResponses);
+      candidate = toolResult.response;
       functionCalls = candidate.functionCalls();
     }
 
