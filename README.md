@@ -1,6 +1,6 @@
 # Snapdeal Mini AI Voice KAM (Key Account Manager)
 
-An AI-powered voice assistant built for Snapdeal sellers to diagnose sales performance drops, uncover root causes (stockouts and cancellation spikes), and deliver actionable, data-driven recovery steps in a natural voice conversation.
+An AI-powered voice assistant built for Snapdeal sellers to diagnose sales performance drops, uncover root causes, and deliver actionable, data-driven recovery steps in a natural voice conversation.
 
 Built for the **Snapdeal AI First Intern Practical Assignment**.
 
@@ -9,36 +9,56 @@ Built for the **Snapdeal AI First Intern Practical Assignment**.
 ## 🌟 Features
 
 - 🎙️ **Two-Way Voice Conversation:** Uses the browser's native **Web Speech API** (`SpeechRecognition` for STT and `SpeechSynthesis` for TTS) with zero external telephony or audio API costs.
-- 👩‍💼 / 👨‍💼 **Dual Persona & Voice Flexibility:**
+- 🏪 **10 Realistic Sellers & Distinct Business Scenarios:**
+  - **SD001 (Rajesh Sharma):** Stockout & Cancellations Spike (Preserves original assignment data).
+  - **SD002 (Pooja Gupta):** High Return Rate Crisis (28% returns from kurti size mismatches).
+  - **SD003 (Amit Verma):** Low Visibility / 76% Impression Collapse on Kitchen Essentials.
+  - **SD004 (Neha Kapoor):** Poor Conversion Rate (High ad clicks, low buyer trust).
+  - **SD005 (Vikas Malhotra):** Hero Running Shoe Stockout in prime sizes 8 & 9.
+  - **SD006 (Sunita Rao):** Logistics SLA Delays & 23% Cancellation Spike.
+  - **SD007 (Karan Mehta):** Healthy Growth (+40% Sales) & Scale-up Opportunity.
+  - **SD008 (Deepak Patel):** ASP Erosion (-43%) from Competitor Price Wars.
+  - **SD009 (Meera Joshi):** Ad Spend Inefficiency (Broad keyword budget drain).
+  - **SD010 (Ananya Singhal):** Post-Festive Slump & 74% Cart Abandonment on Jewelry.
+- 📦 **Product Catalog & Unique SKUs:** Each seller includes 3–5 realistic products with globally unique SKU IDs (`SKU-SD001-01`, etc.), prices, stock levels, and status badges (`IN STOCK`, `LOW STOCK`, `OUT OF STOCK`).
+- 🔄 **Seller Selector on Dashboard:** Switch between sellers anytime via the top navigation bar or modal. The KPI cards, product catalog, and voice assistant greeting immediately adapt to the active seller without mixing data.
+- 🛠️ **Dynamic Function Calling (Zero Metric Hardcoding):** Gemini dynamically queries real-time account data via function calling tools:
+  - `get_seller_profile`: Retrieves seller metrics, store details, and historical comparisons.
+  - `get_seller_products`: Fetches active SKU inventory and stock levels.
+  - `get_seller_analytics`: Computes variances, identifies bottlenecks, and fetches tailored recovery steps.
+- 👩‍💼 / 👨‍💼 **Dual Voice Persona Flexibility:**
   - **Priya (Female Voice):** Optimized Indian/English female voice (`Microsoft Zira`, `Heera`, `Neerja`, `Google UK English Female`) with higher vocal pitch (`1.15`).
   - **Rahul (Male Voice):** Tailored Indian/English male voice (`Microsoft Ravi`, `Prabhat`, `David`) with deeper vocal pitch (`0.95`).
-  - **Voice Settings Modal:** Complete voice synthesizer inspector with a **"Test Voice 🔊"** live preview button.
-- 🧠 **AI Account Intelligence:** Powered by **Google Gemini 1.5 Flash** with custom prompt engineering enforcing voice-first brevity rules (2-3 short sentences, zero markdown, natural spoken cadence).
-- 📊 **Seller Metrics Dashboard:** Real-time visibility into Rajesh Sharma's key account metrics (Sales, Orders, Cancellation Rate, ASP, and Stockout SKUs).
-- 💡 **Algorithmic Root Cause Diagnosis:** Explains how the 14% cancellation spike and 18 out-of-stock items triggered Snapdeal's ranking algorithm downward visibility spiral.
-- 🎯 **Practical Action Plan:** 3 prioritized, high-impact recommendations (48h restock, dashboard fulfillment audit, and 7-day promotional discount campaign).
-- 🛡️ **Zero-Failure Architecture:** Includes a smart built-in conversational dialog fallback so the entire voice experience is 100% testable out-of-the-box even before adding an API key!
-- ⌨️ **Accessibility & Silent Testing:** Interactive quick-suggestion chips and text input bar for testing in quiet environments.
+  - **Voice Settings Modal:** Complete voice synthesizer inspector with a **"Test Voice 🔊"** preview button.
+- 🛡️ **Zero-Failure Architecture:** Includes a smart dynamic dialog engine fallback so the entire voice experience is 100% testable out-of-the-box even before adding an API key!
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-[Seller Rajesh] 
+[Seller in Browser]
        │ (Spoken Audio)
        ▼
-[Web Speech STT] 
+[Web Speech STT]
        │ (Spoken Transcript Text)
        ▼
-[VoiceBot.tsx] ── (POST /api/chat) ──► [Next.js Route Handler]
-                                              │
-                                              ▼
-                                 [Google Gemini 1.5 Flash]
-                                 + System Prompt & Seller Data
-                                              │
-                                              ▼ (Response Text)
-[SpeechSynthesis TTS] ◄── (Priya / Rahul Voice) ─┘
+[VoiceBot.tsx] ── (POST /api/chat with sellerId) ──► [Next.js Route Handler]
+                                                              │
+                                                              ▼
+                                                 [Google Gemini 1.5 Flash]
+                                                 (Dynamic Function Calling)
+                                                              │
+                     ┌────────────────────────────────────────┴────────────────────────────────────────┐
+                     ▼                                        ▼                                        ▼
+           [get_seller_profile]                     [get_seller_products]                    [get_seller_analytics]
+                     │                                        │                                        │
+                     └────────────────────────────────────────┬────────────────────────────────────────┘
+                                                              ▼
+                                                 [lib/seller-data.ts Engine]
+                                                              │
+                                                              ▼ (Grounded Spoken Advice)
+[SpeechSynthesis TTS] ◄────── (Priya / Rahul Voice) ──────────┘
 ```
 
 ---
@@ -49,7 +69,7 @@ Built for the **Snapdeal AI First Intern Practical Assignment**.
 - **Node.js**: v18+ or v20+ or v22+
 - **Browser**: **Google Chrome** or **Microsoft Edge** (for full native Web Speech STT & TTS support)
 
-### 2. Configure Environment (Optional but Recommended)
+### 2. Configure Environment (Optional)
 Get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).  
 Add it to `.env.local`:
 
@@ -70,27 +90,29 @@ Open [http://localhost:3000](http://localhost:3000) in **Google Chrome** or **Mi
 
 ---
 
-## 🔊 Persona & Voice Selection
+## 🌐 REST APIs
 
-In the top bar and landing screen, you can toggle between:
-- **👩‍💼 Priya (Female Voice):** Filters for genuine female synthesizers (e.g., `Microsoft Zira`, `Microsoft Heera`, `Google UK English Female`).
-- **👨‍💼 Rahul (Male Voice):** Uses male synthesizers (e.g., `Microsoft Ravi`, `Microsoft David`).
-- Click **"Voice Settings"** to browse all installed voices on your computer and test them instantly with the **"Test Voice 🔊"** button.
+| Endpoint | Method | Description |
+| :--- | :---: | :--- |
+| `/api/sellers` | `GET` | Returns summary list of all 10 sellers with current sales and scenario tags. |
+| `/api/sellers?id=SD001` | `GET` | Returns full dossier for seller (profile, metrics, products, and analytics). |
+| `/api/sellers?id=SD001&type=products` | `GET` | Returns catalog products and SKU inventory for a seller. |
+| `/api/sellers?id=SD001&type=analytics` | `GET` | Returns computed deltas, bottlenecks, diagnosis, and recommendations. |
+| `/api/chat` | `POST` | Interacts with the Virtual KAM, supporting `sellerId`, `assistantName`, and messages. |
 
 ---
 
-## 🎬 1–2 Minute Screen Recording Script
+## 🧪 Automated Test Suites
 
-Use this script for your submission video:
+Run the automated test suites anytime:
 
-| Step | Action | Spoken User Query (Seller Rajesh) | Expected Bot Spoken Response |
-| :---: | :--- | :--- | :--- |
-| **1** | Click **"Start Voice Call"** | *(Call initiates automatically)* | *"Hello Rajesh! This is Priya [or Rahul] calling from Snapdeal. I'm really glad you reached out, as I can already see some concerning changes in your store performance this month. What has been worrying you the most?"* |
-| **2** | Tap Mic 🎙️ and speak | *"My sales have dropped significantly this month. I don't understand why. Can you help me?"* | *"I can see your monthly orders dropped from 400 to 270, and sales fell to 1,35,000 rupees. Have you noticed any of your top-selling products going out of stock recently?"* |
-| **3** | Tap Mic 🎙️ and speak | *"Yes, I think some of my products ran out of stock. How bad is the situation?"* | *"Rajesh, looking at your data, your out-of-stock products jumped from 5 to 18, and your cancellation rate climbed to 14 percent. When stockouts and cancellations rise, Snapdeal's search algorithm reduces your listing visibility, creating a downward spiral."* |
-| **4** | Tap Mic 🎙️ and speak | *"What should I do to recover my sales?"* | *"First, restock those 18 out-of-stock products within the next 48 hours to stop losing orders. Second, investigate cancellation reasons in your dashboard and connect with our priority logistics partner. Third, run a 7-day promotional discount of 10 to 15 percent on your top 5 products to quickly rebuild visibility."* |
-| **5** | Tap Mic 🎙️ and speak | *"Can you give me a quick summary of what I need to do?"* | *"To summarize today's call, Rajesh: your 33 percent sales drop was caused by 13 new stockouts and cancellations rising to 14 percent. Your three priorities are restocking within 48 hours, checking cancellation reasons in your dashboard, and running a short discount campaign. I've sent these recommendations to your registered Snapdeal email as well. Is there anything else I can help you with?"* |
-| **6** | Tap Mic 🎙️ and speak | *"That is super helpful. Thank you so much!"* | *"Wonderful, Rajesh! I'm confident these steps will help you recover your sales quickly. Don't hesitate to reach back out to Snapdeal seller support anytime. Have a great day!"* |
+```powershell
+# Test multi-seller dataset, API endpoints, SKU uniqueness & seller isolation
+node test_multi_seller.mjs
+
+# Test 5-stage voice conversation protocol
+node test_voice_kam.mjs
+```
 
 ---
 
@@ -99,19 +121,21 @@ Use this script for your submission video:
 ```
 snapdeal/
 ├── app/
-│   ├── api/chat/route.ts      # Serverless route handler interfacing with Gemini 1.5 Flash (Priya & Rahul)
+│   ├── api/
+│   │   ├── chat/route.ts      # Gemini Function Calling route & dynamic dialog engine
+│   │   └── sellers/route.ts   # REST API for sellers, metrics, products & analytics
 │   ├── globals.css            # Tailwind styles & smooth scrollbars
 │   ├── layout.tsx             # Root layout with Snapdeal branding metadata
-│   └── page.tsx               # Main entry page rendering VoiceBot
+│   └── page.tsx               # Client-mounted home page (zero hydration issues)
 ├── components/
-│   └── VoiceBot.tsx           # Voice UX, SpeechRecognition (STT), SpeechSynthesis (TTS), Voice Settings modal
+│   └── VoiceBot.tsx           # Voice UX, Seller Selector, Product Catalog & Voice Settings
 ├── lib/
-│   ├── seller-data.ts         # Rajesh Sharma mock performance data & computed deltas
-│   └── system-prompt.ts       # Priya & Rahul AI personas, 5-stage conversation rules & constraints
+│   ├── seller-data.ts         # 10 realistic sellers, 40 SKUs, deltas & analytics engine
+│   └── system-prompt.ts       # Tool-driven system prompt (zero hardcoded metrics)
+├── test_multi_seller.mjs      # Test suite for 10 sellers, APIs & seller isolation
+├── test_voice_kam.mjs         # Test suite for 5-stage conversation flow
 ├── .env.local                 # Gemini API credentials
-├── next.config.mjs            # Next.js configuration
-├── tailwind.config.ts         # Tailwind CSS styling configuration
-├── package.json               # Dependencies and build scripts
+├── run_dev.bat                # Windows 1-click launcher
 ├── SUBMISSION_NOTE.md         # Comprehensive 1-page architecture & technical report
 └── README.md                  # Documentation and demo guide
 ```

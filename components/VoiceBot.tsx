@@ -1,7 +1,14 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { SELLER_DATA, COMPUTED } from '@/lib/seller-data';
+import {
+  MOCK_SELLERS,
+  getAllSellers,
+  getSellerById,
+  computeSellerDeltas,
+  SellerProfile,
+  SellerProduct,
+} from '@/lib/seller-data';
 import { KAMName } from '@/lib/system-prompt';
 import {
   Mic,
@@ -9,12 +16,22 @@ import {
   PhoneOff,
   Volume2,
   TrendingDown,
+  TrendingUp,
   AlertCircle,
   Sparkles,
   Send,
   Key,
   ShieldCheck,
   Play,
+  Package,
+  Layers,
+  Store,
+  ChevronDown,
+  Tag,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  RotateCcw,
 } from 'lucide-react';
 
 type Message = { role: 'user' | 'assistant'; content: string; timestamp?: string };
@@ -32,9 +49,14 @@ export default function VoiceBot() {
   const [textInput, setTextInput] = useState('');
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [sellerModalOpen, setSellerModalOpen] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
   const [hasVoiceSupport, setHasVoiceSupport] = useState(true);
   const [showMetricsDrawer, setShowMetricsDrawer] = useState(true);
+  const [metricsTab, setMetricsTab] = useState<'kpi' | 'catalog'>('kpi');
+
+  // Active Seller Selection (SD001 - SD010)
+  const [selectedSellerId, setSelectedSellerId] = useState<string>('SD001');
 
   // Persona: Priya (Female) or Rahul (Male)
   const [persona, setPersona] = useState<KAMName>('Priya');
@@ -47,6 +69,11 @@ export default function VoiceBot() {
   const bottomRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+
+  // Derived active seller & computation deltas
+  const currentSeller: SellerProfile = getSellerById(selectedSellerId) || MOCK_SELLERS.SD001;
+  const currentDeltas = computeSellerDeltas(currentSeller);
+  const allSellers = getAllSellers();
 
   // Sync ref with messages state so SpeechRecognition event handlers access latest messages
   useEffect(() => {
@@ -92,6 +119,11 @@ export default function VoiceBot() {
       const savedPersona = localStorage.getItem('snapdeal_persona') as KAMName | null;
       if (savedPersona === 'Rahul' || savedPersona === 'Priya') {
         setPersona(savedPersona);
+      }
+
+      const savedSeller = localStorage.getItem('snapdeal_seller_id');
+      if (savedSeller && MOCK_SELLERS[savedSeller]) {
+        setSelectedSellerId(savedSeller);
       }
     } catch {
       // Ignore localStorage exceptions in private browsing
@@ -174,9 +206,33 @@ export default function VoiceBot() {
   // Persona change handler
   const handlePersonaChange = (newPersona: KAMName) => {
     setPersona(newPersona);
-    setSelectedVoiceURI(''); // Reset manual override to auto-select best voice for new persona
+    setSelectedVoiceURI('');
     try {
       localStorage.setItem('snapdeal_persona', newPersona);
+    } catch {}
+  };
+
+  // Seller switch handler
+  const handleSellerChange = (newSellerId: string) => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+
+    setSelectedSellerId(newSellerId);
+    setSellerModalOpen(false);
+    setIsStarted(false);
+    setMessages([]);
+    setBotState('idle');
+    const newSeller = getSellerById(newSellerId) || MOCK_SELLERS.SD001;
+    setStatusText(`Switched to ${newSeller.name} (${newSeller.store}). Click "Start Call" to begin.`);
+
+    try {
+      localStorage.setItem('snapdeal_seller_id', newSellerId);
     } catch {}
   };
 
@@ -193,13 +249,12 @@ export default function VoiceBot() {
         setStatusText(`${persona} is speaking...`);
 
         try {
-          window.speechSynthesis.cancel(); // stop any leftover speech
+          window.speechSynthesis.cancel();
         } catch {}
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-IN';
         utterance.rate = 0.95;
-        // Pitch tuning: 1.15 for female Priya, 0.95 for male Rahul
         utterance.pitch = persona === 'Priya' ? 1.15 : 0.95;
         utterance.volume = 1.0;
 
@@ -241,10 +296,11 @@ export default function VoiceBot() {
       const voices = window.speechSynthesis.getVoices();
       const voice = voiceURI ? voices.find((v) => v.voiceURI === voiceURI) : getEffectiveVoice();
 
+      const firstName = currentSeller.name.split(' ')[0];
       const testPhrase =
         persona === 'Priya'
-          ? "Hello Rajesh! I am Priya, your Snapdeal Virtual KAM. How can I help improve your sales today?"
-          : "Hello Rajesh! I am Rahul, your Snapdeal Virtual KAM. How can I help improve your sales today?";
+          ? `Hello ${firstName}! I am Priya, your Snapdeal Virtual KAM. How can I help improve your sales today?`
+          : `Hello ${firstName}! I am Rahul, your Snapdeal Virtual KAM. How can I help improve your sales today?`;
 
       const utterance = new SpeechSynthesisUtterance(testPhrase);
       utterance.lang = 'en-IN';
@@ -259,7 +315,7 @@ export default function VoiceBot() {
   const askChat = useCallback(
     async (msgs: Message[]): Promise<string> => {
       setBotState('processing');
-      setStatusText(`${persona} is analyzing your account...`);
+      setStatusText(`${persona} is analyzing ${currentSeller.store}...`);
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -268,6 +324,7 @@ export default function VoiceBot() {
           messages: msgs,
           apiKey: customApiKey || undefined,
           assistantName: persona,
+          sellerId: selectedSellerId,
         }),
       });
 
@@ -279,7 +336,7 @@ export default function VoiceBot() {
       const data = await res.json();
       return data.text as string;
     },
-    [customApiKey, persona]
+    [currentSeller.store, customApiKey, persona, selectedSellerId]
   );
 
   /** Start conversation */
@@ -309,7 +366,6 @@ export default function VoiceBot() {
   const startListening = useCallback(() => {
     setErrorMsg(null);
 
-    // Stop TTS if speaking
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
         window.speechSynthesis.cancel();
@@ -409,7 +465,6 @@ export default function VoiceBot() {
       setBotState('idle');
       setStatusText('Listening paused. Tap mic to resume.');
     } else if (botState === 'speaking') {
-      // Allow user to interrupt
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         try {
           window.speechSynthesis.cancel();
@@ -528,10 +583,33 @@ export default function VoiceBot() {
   const visibleMessages = messages.filter((m) => m.content !== TRIGGER);
   const activeAvatar = persona === 'Priya' ? '👩‍💼' : '👨‍💼';
 
+  const getStockBadge = (status: 'in_stock' | 'low_stock' | 'out_of_stock') => {
+    switch (status) {
+      case 'in_stock':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+            <CheckCircle2 className="w-2.5 h-2.5" /> In Stock
+          </span>
+        );
+      case 'low_stock':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <AlertTriangle className="w-2.5 h-2.5" /> Low Stock
+          </span>
+        );
+      case 'out_of_stock':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+            <XCircle className="w-2.5 h-2.5" /> Out of Stock
+          </span>
+        );
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 via-slate-50 to-orange-50 flex flex-col items-center py-6 px-4 sm:px-6">
       {/* Top Navigation Bar */}
-      <header className="w-full max-w-4xl flex items-center justify-between mb-4">
+      <header className="w-full max-w-5xl flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#e40046] flex items-center justify-center text-white font-extrabold text-2xl shadow-md shadow-rose-200">
             S
@@ -540,18 +618,36 @@ export default function VoiceBot() {
             <div className="flex items-center gap-2">
               <span className="text-xl font-bold tracking-tight text-[#e40046]">Snapdeal</span>
               <span className="text-xs bg-rose-100 text-[#c1003b] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                Seller Voice KAM
+                Virtual Voice KAM
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              AI-Powered Account Manager • 24x7 Seller Diagnostics
+              AI-Powered Account Manager • Dynamic Multi-Seller Intelligence
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Quick Voice & Persona Toggle */}
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm text-xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Active Seller Switcher Button */}
+          <button
+            onClick={() => setSellerModalOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-rose-200 bg-white hover:bg-rose-50/60 text-slate-800 text-xs font-semibold shadow-xs transition"
+            title="Switch Seller Profile"
+          >
+            <Store className="w-3.5 h-3.5 text-rose-600" />
+            <div className="text-left">
+              <span className="text-[10px] text-slate-400 block font-normal leading-none">
+                Active Seller ({currentSeller.sellerId})
+              </span>
+              <span className="font-bold text-slate-800 leading-tight">
+                {currentSeller.name} &bull; {currentSeller.store}
+              </span>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+
+          {/* Quick Persona Toggle */}
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs text-xs">
             <button
               type="button"
               onClick={() => handlePersonaChange('Priya')}
@@ -582,114 +678,239 @@ export default function VoiceBot() {
 
           <button
             onClick={() => setVoiceSettingsOpen(true)}
-            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
+            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-xs"
             title="Configure Speech Voices"
           >
             <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="hidden sm:inline">Voice Settings</span>
+            <span className="hidden sm:inline">Voice</span>
           </button>
 
           <button
             onClick={() => setShowMetricsDrawer(!showMetricsDrawer)}
-            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
+            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-xs"
           >
-            <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
-            <span className="hidden sm:inline">{showMetricsDrawer ? 'Hide Data' : 'View Data'}</span>
+            <Layers className="w-3.5 h-3.5 text-rose-500" />
+            <span className="hidden sm:inline">{showMetricsDrawer ? 'Hide Drawer' : 'Show Drawer'}</span>
           </button>
 
           <button
             onClick={() => setApiKeyModalOpen(true)}
-            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-sm"
+            className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium transition shadow-xs"
             title="Configure Gemini API Key"
           >
             <Key className="w-3.5 h-3.5 text-amber-500" />
-            <span className="hidden sm:inline">{customApiKey ? 'API Key' : 'API Key'}</span>
+            <span className="hidden sm:inline">API Key</span>
           </button>
         </div>
       </header>
 
-      {/* Seller Metrics Bar */}
+      {/* Seller Dashboard & Catalog Drawer */}
       {showMetricsDrawer && (
-        <section className="w-full max-w-4xl bg-white border border-rose-100 rounded-2xl p-4 mb-4 shadow-sm">
+        <section className="w-full max-w-5xl bg-white border border-rose-100 rounded-2xl p-4 mb-4 shadow-sm">
+          {/* Header Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-            <div>
-              <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                Seller Profile
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-slate-900 text-white font-mono font-bold px-2 py-0.5 rounded-md">
+                {currentSeller.sellerId}
               </span>
-              <h2 className="text-sm font-bold text-slate-800">
-                {SELLER_DATA.name} &bull;{' '}
-                <span className="text-slate-600 font-normal">{SELLER_DATA.store}</span>
-              </h2>
+              <div>
+                <h2 className="text-sm font-bold text-slate-800">
+                  {currentSeller.name} &bull;{' '}
+                  <span className="text-slate-600 font-medium">{currentSeller.store}</span>
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  {currentSeller.category} &bull; {currentSeller.city}
+                </p>
+              </div>
             </div>
-            <div className="text-xs text-slate-500 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
-              Category: <span className="font-semibold text-slate-700">{SELLER_DATA.category}</span>
+
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setMetricsTab('kpi')}
+                  className={`px-3 py-1 rounded-md font-semibold transition ${
+                    metricsTab === 'kpi'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  📊 Performance KPI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMetricsTab('catalog')}
+                  className={`px-3 py-1 rounded-md font-semibold transition ${
+                    metricsTab === 'catalog'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  📦 Products ({currentSeller.products.length})
+                </button>
+              </div>
+
+              <span className="text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg">
+                Scenario: {currentSeller.scenario}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-3 text-center">
-            {/* Sales */}
-            <div className="bg-rose-50/60 border border-rose-100 rounded-xl p-2.5">
-              <span className="text-[11px] text-slate-500 font-medium">Monthly Sales</span>
-              <div className="text-sm font-bold text-slate-900 mt-0.5">
-                ₹{SELLER_DATA.thisMonth.sales.toLocaleString('en-IN')}
+          {/* TAB 1: KPI Grid */}
+          {metricsTab === 'kpi' && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-3 text-center">
+              {/* Monthly Sales */}
+              <div className="bg-rose-50/60 border border-rose-100 rounded-xl p-2.5">
+                <span className="text-[11px] text-slate-500 font-medium">Monthly Sales</span>
+                <div className="text-sm font-bold text-slate-900 mt-0.5">
+                  ₹{currentSeller.thisMonth.sales.toLocaleString('en-IN')}
+                </div>
+                <div
+                  className={`text-[10px] font-semibold flex items-center justify-center gap-0.5 mt-0.5 ${
+                    currentDeltas.salesChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  <span>
+                    {currentDeltas.salesChangePct >= 0 ? '↑' : '↓'} was ₹
+                    {currentSeller.lastMonth.sales.toLocaleString('en-IN')}
+                  </span>
+                  <span className="bg-white/80 px-1 rounded">
+                    {currentDeltas.salesChangePct >= 0 ? '+' : ''}
+                    {currentDeltas.salesChangePct}%
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] font-semibold text-rose-600 flex items-center justify-center gap-0.5 mt-0.5">
-                <span>↓ was ₹{SELLER_DATA.lastMonth.sales.toLocaleString('en-IN')}</span>
-                <span className="bg-rose-100 px-1 rounded">-{COMPUTED.salesDropPct}%</span>
-              </div>
-            </div>
 
-            {/* Orders */}
-            <div className="bg-rose-50/60 border border-rose-100 rounded-xl p-2.5">
-              <span className="text-[11px] text-slate-500 font-medium">Orders</span>
-              <div className="text-sm font-bold text-slate-900 mt-0.5">
-                {SELLER_DATA.thisMonth.orders}
+              {/* Orders */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[11px] text-slate-500 font-medium">Monthly Orders</span>
+                <div className="text-sm font-bold text-slate-900 mt-0.5">
+                  {currentSeller.thisMonth.orders} orders
+                </div>
+                <div
+                  className={`text-[10px] font-semibold flex items-center justify-center gap-0.5 mt-0.5 ${
+                    currentDeltas.ordersChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  <span>was {currentSeller.lastMonth.orders}</span>
+                  <span className="bg-white/80 px-1 rounded">
+                    {currentDeltas.ordersChangePct >= 0 ? '+' : ''}
+                    {currentDeltas.ordersChangePct}%
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] font-semibold text-rose-600 flex items-center justify-center gap-0.5 mt-0.5">
-                <span>↓ was {SELLER_DATA.lastMonth.orders}</span>
-                <span className="bg-rose-100 px-1 rounded">-{COMPUTED.ordersDropPct}%</span>
-              </div>
-            </div>
 
-            {/* Cancellation Rate */}
-            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-2.5">
-              <span className="text-[11px] text-slate-500 font-medium">Cancellation Rate</span>
-              <div className="text-sm font-bold text-amber-700 mt-0.5">
-                {SELLER_DATA.thisMonth.cancellationRate}%
+              {/* Cancellation Rate */}
+              <div
+                className={`border rounded-xl p-2.5 ${
+                  currentSeller.thisMonth.cancellationRate > 10
+                    ? 'bg-rose-50/70 border-rose-200'
+                    : 'bg-emerald-50/60 border-emerald-100'
+                }`}
+              >
+                <span className="text-[11px] text-slate-500 font-medium">Cancellation Rate</span>
+                <div
+                  className={`text-sm font-bold mt-0.5 ${
+                    currentSeller.thisMonth.cancellationRate > 10 ? 'text-rose-700' : 'text-emerald-700'
+                  }`}
+                >
+                  {currentSeller.thisMonth.cancellationRate}%
+                </div>
+                <div className="text-[10px] font-semibold text-slate-500 flex items-center justify-center gap-0.5 mt-0.5">
+                  <span>was {currentSeller.lastMonth.cancellationRate}%</span>
+                  <span className="bg-white/80 px-1 rounded">
+                    {currentDeltas.cancellationDelta >= 0 ? '+' : ''}
+                    {currentDeltas.cancellationDelta}pp
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] font-semibold text-amber-600 flex items-center justify-center gap-0.5 mt-0.5">
-                <span>↑ was {SELLER_DATA.lastMonth.cancellationRate}%</span>
-                <span className="bg-amber-100 px-1 rounded">+{COMPUTED.cancellationIncrease}pp</span>
-              </div>
-            </div>
 
-            {/* Avg Selling Price */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
-              <span className="text-[11px] text-slate-500 font-medium">Avg Selling Price</span>
-              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                ₹{SELLER_DATA.thisMonth.avgSellingPrice}
+              {/* Return Rate */}
+              <div
+                className={`border rounded-xl p-2.5 ${
+                  currentSeller.thisMonth.returnRate > 15
+                    ? 'bg-rose-50/70 border-rose-200'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <span className="text-[11px] text-slate-500 font-medium">Return Rate</span>
+                <div
+                  className={`text-sm font-bold mt-0.5 ${
+                    currentSeller.thisMonth.returnRate > 15 ? 'text-rose-700' : 'text-slate-800'
+                  }`}
+                >
+                  {currentSeller.thisMonth.returnRate}%
+                </div>
+                <div className="text-[10px] font-semibold text-slate-500 flex items-center justify-center gap-0.5 mt-0.5">
+                  <span>was {currentSeller.lastMonth.returnRate}%</span>
+                  <span className="bg-white/80 px-1 rounded">
+                    {currentDeltas.returnRateDelta >= 0 ? '+' : ''}
+                    {currentDeltas.returnRateDelta}pp
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] font-medium text-emerald-600 mt-0.5">
-                Unchanged (₹500)
-              </div>
-            </div>
 
-            {/* Out of Stock */}
-            <div className="bg-rose-50/60 border border-rose-100 rounded-xl p-2.5 col-span-2 sm:col-span-1">
-              <span className="text-[11px] text-slate-500 font-medium">Out-of-Stock SKUs</span>
-              <div className="text-sm font-bold text-rose-700 mt-0.5">
-                {SELLER_DATA.thisMonth.outOfStockProducts} items
-              </div>
-              <div className="text-[10px] font-semibold text-rose-600 mt-0.5">
-                +{COMPUTED.newOutOfStockCount} new stockouts!
+              {/* Stockouts / Inventory */}
+              <div
+                className={`border rounded-xl p-2.5 col-span-2 sm:col-span-1 ${
+                  currentSeller.thisMonth.outOfStockProducts > 5
+                    ? 'bg-amber-50/80 border-amber-200'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <span className="text-[11px] text-slate-500 font-medium">Out-of-Stock SKUs</span>
+                <div
+                  className={`text-sm font-bold mt-0.5 ${
+                    currentSeller.thisMonth.outOfStockProducts > 5
+                      ? 'text-amber-800'
+                      : 'text-slate-800'
+                  }`}
+                >
+                  {currentSeller.thisMonth.outOfStockProducts} items
+                </div>
+                <div className="text-[10px] font-semibold text-slate-500 mt-0.5">
+                  {currentDeltas.stockoutDelta >= 0 ? `+${currentDeltas.stockoutDelta} new stockouts` : 'stock improved'}
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* TAB 2: Product Catalog Table */}
+          {metricsTab === 'catalog' && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 uppercase text-[10px] bg-slate-50">
+                    <th className="py-2 px-3 font-semibold">SKU ID</th>
+                    <th className="py-2 px-3 font-semibold">Product Title</th>
+                    <th className="py-2 px-3 font-semibold">Category</th>
+                    <th className="py-2 px-3 font-semibold">Price</th>
+                    <th className="py-2 px-3 font-semibold">Current Stock</th>
+                    <th className="py-2 px-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {currentSeller.products.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50/60">
+                      <td className="py-2 px-3 font-mono font-bold text-slate-700">{p.id}</td>
+                      <td className="py-2 px-3 font-medium text-slate-900 max-w-xs truncate">
+                        {p.title}
+                      </td>
+                      <td className="py-2 px-3 text-slate-500">{p.category}</td>
+                      <td className="py-2 px-3 font-semibold text-slate-900">₹{p.price}</td>
+                      <td className="py-2 px-3 font-mono text-slate-700">{p.stock} units</td>
+                      <td className="py-2 px-3">{getStockBadge(p.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 
-      {/* Main Call Interface Container */}
-      <main className="w-full max-w-4xl bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col flex-1">
+      {/* Main Voice KAM Interface */}
+      <main className="w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col flex-1">
         {!isStarted ? (
           /* Landing Screen */
           <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center flex-1 my-auto">
@@ -703,48 +924,23 @@ export default function VoiceBot() {
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Namaste, Rajesh Sharma!
+              Namaste, {currentSeller.name}!
             </h1>
             <p className="text-base text-rose-600 font-semibold mt-1">
               {persona} &bull; Virtual Key Account Manager ({persona === 'Priya' ? 'Female' : 'Male'} Voice)
             </p>
-            <p className="text-sm text-slate-500 max-w-md mx-auto mt-3 leading-relaxed">
-              I noticed your sales dipped from ₹2,00,000 to ₹1,35,000 this month. Start an instant
-              voice call to diagnose root causes and get personalized recovery steps.
+            <p className="text-xs font-medium text-slate-500 mt-1">
+              Store: <span className="text-slate-800 font-bold">{currentSeller.store}</span> &bull; Category: {currentSeller.category}
+            </p>
+            <p className="text-sm text-slate-500 max-w-lg mx-auto mt-3 leading-relaxed">
+              I have loaded your real-time account data ({currentSeller.sellerId}). Click below to start an interactive voice consultation to diagnose bottlenecks and formulate practical recovery steps.
             </p>
 
-            {/* Persona Switch Pills */}
-            <div className="mt-4 flex items-center gap-2 justify-center">
-              <span className="text-xs text-slate-400 font-medium">Assistant Persona:</span>
-              <button
-                type="button"
-                onClick={() => handlePersonaChange('Priya')}
-                className={`text-xs px-3 py-1 rounded-full font-semibold border transition ${
-                  persona === 'Priya'
-                    ? 'bg-rose-50 border-rose-300 text-rose-700 ring-2 ring-rose-200'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                👩‍💼 Priya (Female Voice)
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePersonaChange('Rahul')}
-                className={`text-xs px-3 py-1 rounded-full font-semibold border transition ${
-                  persona === 'Rahul'
-                    ? 'bg-slate-100 border-slate-400 text-slate-900 ring-2 ring-slate-200'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                👨‍💼 Rahul (Male Voice)
-              </button>
-            </div>
-
             {/* Quick Scenario prompt helper */}
-            <div className="mt-6 mb-8 inline-flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-xs text-slate-600">
-              <Sparkles className="w-4 h-4 text-amber-500" />
+            <div className="mt-5 mb-7 inline-flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-xs text-slate-700 max-w-md text-left">
+              <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
               <span>
-                Simulated Seller Concern: <i>&ldquo;My sales have dropped significantly this month. Can you help me?&rdquo;</i>
+                <strong>Primary Bottleneck:</strong> {currentSeller.primaryBottleneck}
               </span>
             </div>
 
@@ -753,7 +949,7 @@ export default function VoiceBot() {
               className="group relative inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-[#e40046] hover:bg-[#c1003b] active:scale-95 text-white font-bold text-lg shadow-lg shadow-rose-300 hover:shadow-xl transition-all duration-200"
             >
               <Phone className="w-5 h-5 group-hover:rotate-12 transition-transform duration-300" />
-              <span>Start Voice Call with {persona}</span>
+              <span>Start Voice Call for {currentSeller.name.split(' ')[0]}</span>
             </button>
 
             {!hasVoiceSupport && (
@@ -768,17 +964,17 @@ export default function VoiceBot() {
               </span>
               <span>&bull;</span>
               <span className="flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Google Gemini 1.5 Flash
+                <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Dynamic Function Calling
               </span>
               <span>&bull;</span>
-              <span>Zero external telephony required</span>
+              <span>10 Distinct Mock Sellers</span>
             </div>
           </div>
         ) : (
           /* Active Call Screen */
           <div className="flex flex-col flex-1 h-[620px]">
             {/* Call Header */}
-            <div className="bg-[#e40046] text-white px-6 py-3.5 flex items-center justify-between shadow-md">
+            <div className="bg-[#e40046] text-white px-6 py-3.5 flex items-center justify-between shadow-md flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <div
@@ -794,11 +990,11 @@ export default function VoiceBot() {
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold leading-none">{persona}</h3>
                     <span className="text-[10px] font-semibold bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Live Voice Call ({persona === 'Priya' ? 'Female' : 'Male'})
+                      Live Call &bull; {currentSeller.sellerId}
                     </span>
                   </div>
                   <p className="text-xs text-rose-100 mt-1">
-                    Virtual Key Account Manager &bull; Snapdeal India
+                    Virtual KAM for <strong>{currentSeller.name}</strong> ({currentSeller.store})
                   </p>
                 </div>
               </div>
@@ -827,7 +1023,7 @@ export default function VoiceBot() {
               {visibleMessages.length === 0 && (
                 <div className="text-center text-slate-400 text-xs py-12 flex flex-col items-center gap-2">
                   <div className="w-8 h-8 rounded-full border-2 border-rose-300 border-t-transparent animate-spin"></div>
-                  <span>Connecting with {persona}...</span>
+                  <span>Connecting with {persona} for {currentSeller.store}...</span>
                 </div>
               )}
 
@@ -849,7 +1045,7 @@ export default function VoiceBot() {
                           msg.role === 'user' ? 'text-rose-200' : 'text-rose-600'
                         }`}
                       >
-                        {msg.role === 'user' ? 'Rajesh Sharma (You)' : `${persona} (Snapdeal KAM)`}
+                        {msg.role === 'user' ? `${currentSeller.name} (Seller)` : `${persona} (Snapdeal KAM)`}
                       </span>
                       {msg.timestamp && (
                         <span
@@ -881,7 +1077,9 @@ export default function VoiceBot() {
                     <div className="w-2 h-2 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                     <div className="w-2 h-2 bg-amber-500 rounded-full animate-bounce"></div>
                   </div>
-                  <span className="font-medium">Analyzing account data & formulating advice...</span>
+                  <span className="font-medium">
+                    Retrieving {currentSeller.sellerId} account data & generating recommendations...
+                  </span>
                 </div>
               )}
 
@@ -891,11 +1089,11 @@ export default function VoiceBot() {
             {/* Quick Speech Suggestions */}
             <div className="bg-white/80 border-t border-slate-100 px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs">
               <span className="text-slate-400 font-medium whitespace-nowrap text-[11px]">
-                Suggested questions:
+                Ask {persona}:
               </span>
               <button
                 onClick={() => {
-                  setTextInput("My sales dropped significantly this month. Can you help me?");
+                  setTextInput("My sales have dropped significantly this month. Can you help me understand why?");
                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                   setTimeout(() => handleTextSubmit(fakeEvent), 50);
                 }}
@@ -905,33 +1103,33 @@ export default function VoiceBot() {
               </button>
               <button
                 onClick={() => {
-                  setTextInput("Yes, I think some products are out of stock. How bad is it?");
+                  setTextInput("What is the primary root cause and bottleneck in my account?");
                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                   setTimeout(() => handleTextSubmit(fakeEvent), 50);
                 }}
                 className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 transition text-[11px]"
               >
-                &ldquo;How bad is the stockout?&rdquo;
+                &ldquo;Diagnose my bottleneck&rdquo;
               </button>
               <button
                 onClick={() => {
-                  setTextInput("What are your top 3 recommendations for me to recover?");
+                  setTextInput("What 2-3 practical actions should I take immediately?");
                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                   setTimeout(() => handleTextSubmit(fakeEvent), 50);
                 }}
                 className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 transition text-[11px]"
               >
-                &ldquo;What are your 3 recommendations?&rdquo;
+                &ldquo;Top recommendations&rdquo;
               </button>
               <button
                 onClick={() => {
-                  setTextInput("Can you summarize our call and next steps?");
+                  setTextInput("Can you summarize our call and my next action items?");
                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                   setTimeout(() => handleTextSubmit(fakeEvent), 50);
                 }}
                 className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 transition text-[11px]"
               >
-                &ldquo;Summarize next steps&rdquo;
+                &ldquo;Summarize call&rdquo;
               </button>
             </div>
 
@@ -961,7 +1159,7 @@ export default function VoiceBot() {
 
             {/* Voice & Text Interaction Bar */}
             <div className="bg-white border-t border-slate-200 p-4 flex flex-col sm:flex-row items-center gap-3">
-              {/* Giant Voice Push-to-Talk / Toggle Button */}
+              {/* Voice Push-to-Talk Button */}
               <div className="flex items-center gap-3 w-full sm:w-auto justify-center">
                 <button
                   onClick={handleMicClick}
@@ -1004,14 +1202,14 @@ export default function VoiceBot() {
                 </div>
               </div>
 
-              {/* Text Input Fallback (for accessibility or testing) */}
+              {/* Text Input Fallback */}
               <form onSubmit={handleTextSubmit} className="flex-1 flex items-center gap-2 w-full">
                 <div className="relative flex-1">
                   <input
                     type="text"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
-                    placeholder={`Speak via mic or type question for ${persona}...`}
+                    placeholder={`Speak via mic or type question for ${currentSeller.store}...`}
                     disabled={botState === 'processing'}
                     className="w-full text-xs sm:text-sm pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 rounded-xl outline-none transition"
                   />
@@ -1040,10 +1238,104 @@ export default function VoiceBot() {
       </main>
 
       {/* Footer / Attribution */}
-      <footer className="mt-4 text-center text-xs text-slate-400 max-w-4xl w-full flex flex-wrap items-center justify-between gap-2 px-2">
+      <footer className="mt-4 text-center text-xs text-slate-400 max-w-5xl w-full flex flex-wrap items-center justify-between gap-2 px-2">
         <span>Snapdeal AI First Intern Assignment &bull; Mini AI Voice KAM</span>
-        <span>Built with Next.js 14, Google Gemini, Web Speech API & Tailwind CSS</span>
+        <span>Built with Next.js 14, Google Gemini Tools, Web Speech API & Tailwind CSS</span>
       </footer>
+
+      {/* Seller Selector Modal */}
+      {sellerModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Store className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Select Seller Account (10 Available)</h3>
+                  <p className="text-xs text-slate-500">
+                    Switch between different business scenarios and categories
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSellerModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Seller List Grid */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {allSellers.map((s) => {
+                const isSelected = s.sellerId === selectedSellerId;
+                return (
+                  <div
+                    key={s.sellerId}
+                    onClick={() => handleSellerChange(s.sellerId)}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? 'border-rose-400 bg-rose-50/70 ring-2 ring-rose-200 shadow-xs'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/80 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${
+                          isSelected ? 'bg-[#e40046] text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {s.sellerId}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold text-slate-900">{s.name}</h4>
+                          <span className="text-xs text-slate-500 font-normal">({s.store})</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          {s.category} &bull; {s.city}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] font-semibold text-rose-700 bg-rose-100/70 px-2 py-0.5 rounded-md inline-block mb-0.5">
+                        {s.scenario}
+                      </span>
+                      <div className="text-xs font-bold text-slate-900">
+                        ₹{s.currentSales.toLocaleString('en-IN')}{' '}
+                        <span
+                          className={`text-[10px] ${
+                            s.salesChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                          }`}
+                        >
+                          ({s.salesChangePct >= 0 ? '+' : ''}
+                          {s.salesChangePct}%)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                SD001 preserves original assignment data.
+              </span>
+              <button
+                type="button"
+                onClick={() => setSellerModalOpen(false)}
+                className="text-xs px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Voice & Persona Settings Modal */}
       {voiceSettingsOpen && (
@@ -1174,7 +1466,7 @@ export default function VoiceBot() {
 
             <p className="text-xs text-slate-600 mb-4 leading-relaxed">
               Snapdeal Voice KAM uses <strong>Google Gemini</strong> for real-time seller dialog
-              intelligence. You can enter your API key here or place it in{' '}
+              intelligence with function calling. You can enter your API key here or place it in{' '}
               <code className="bg-slate-100 px-1 py-0.5 rounded text-rose-600">.env.local</code>.
             </p>
 

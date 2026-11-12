@@ -1,57 +1,148 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getSystemPrompt, KAMName } from '@/lib/system-prompt';
+// app/api/chat/route.ts
+// Dynamic Voice KAM Route with Gemini Function Calling & Resilient Analytics Engine
 
-// Rule-based fallback conversational brain in case Gemini API key is missing or invalid
-function getDeterministicResponse(
+export const dynamic = 'force-dynamic';
+
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { getSystemPrompt, KAMName } from '@/lib/system-prompt';
+import {
+  MOCK_SELLERS,
+  getSellerById,
+  getSellerProducts,
+  getSellerAnalytics,
+  computeSellerDeltas,
+} from '@/lib/seller-data';
+
+// Tool declarations for dynamic Gemini function calling
+const tools: any = [
+  {
+    functionDeclarations: [
+      {
+        name: 'get_seller_profile',
+        description: 'Get seller identity, store details, and last vs this month performance metrics (sales, orders, cancellations, ASP, impressions, clicks, conversions, returns, stockouts).',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sellerId: {
+              type: SchemaType.STRING,
+              description: 'Unique Seller ID (e.g., SD001, SD002, etc.)',
+            },
+          },
+          required: ['sellerId'],
+        },
+      },
+      {
+        name: 'get_seller_products',
+        description: 'Get the product catalog, SKU IDs, pricing, and stock status for a seller.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sellerId: {
+              type: SchemaType.STRING,
+              description: 'Unique Seller ID (e.g., SD001, SD002, etc.)',
+            },
+          },
+          required: ['sellerId'],
+        },
+      },
+      {
+        name: 'get_seller_analytics',
+        description: 'Compute variances, diagnose primary root causes, and retrieve prioritized business recovery recommendations for a seller.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sellerId: {
+              type: SchemaType.STRING,
+              description: 'Unique Seller ID (e.g., SD001, SD002, etc.)',
+            },
+          },
+          required: ['sellerId'],
+        },
+      },
+    ],
+  },
+];
+
+// Dynamic dialog engine fallback that inspects active seller data deterministically
+function getDynamicFallbackResponse(
   messages: { role: string; content: string }[],
-  assistantName: KAMName = 'Priya'
+  assistantName: KAMName = 'Priya',
+  sellerId: string = 'SD001'
 ): string {
   const lastMsg = (messages[messages.length - 1]?.content || '').toLowerCase();
   const historyText = messages.map((m) => m.content.toLowerCase()).join(' ');
+
+  const seller = getSellerById(sellerId) || MOCK_SELLERS.SD001;
+  const analytics = getSellerAnalytics(seller.sellerId);
+  const deltas = computeSellerDeltas(seller);
   const name = assistantName === 'Rahul' ? 'Rahul' : 'Priya';
 
+  // STAGE 1: Greeting
   if (lastMsg.includes('[call_started]') || messages.length <= 1) {
-    return `Hello Rajesh! This is ${name} calling from Snapdeal. I'm really glad you reached out, as I can already see some concerning changes in your store performance this month. What has been worrying you the most?`;
+    return `Hello ${seller.name.split(' ')[0]}! This is ${name} calling from Snapdeal. I'm really glad you reached out, as I can already see some notable shifts in your store performance this month. What has been worrying you the most?`;
   }
 
+  // STAGE 2: Active Listening / Inquiries
   if (
     lastMsg.includes('sales') ||
     lastMsg.includes('drop') ||
     lastMsg.includes('fell') ||
     lastMsg.includes('decline') ||
     lastMsg.includes('help') ||
-    lastMsg.includes('orders')
+    lastMsg.includes('worry') ||
+    lastMsg.includes('orders') ||
+    lastMsg.includes('concern')
   ) {
-    if (!historyText.includes('out of stock')) {
-      return "I can see your monthly orders dropped from 400 to 270, and sales fell to 1,35,000 rupees. Have you noticed any of your top-selling products going out of stock recently?";
+    if (!historyText.includes('noticed') && !historyText.includes('factor')) {
+      if (seller.scenarioType === 'high_returns') {
+        return `I can see you maintained good volume with ${seller.thisMonth.orders} orders, but your returns climbed steeply to ${seller.thisMonth.returnRate} percent. Have customers reached out with sizing or fabric concerns on your kurti listings?`;
+      } else if (seller.scenarioType === 'low_visibility') {
+        return `I noticed your monthly orders dropped to ${seller.thisMonth.orders}, while conversion stayed strong at ${seller.thisMonth.conversionRate} percent. Have you checked whether your search impressions and traffic dropped recently?`;
+      } else if (seller.scenarioType === 'poor_conversion') {
+        return `I see your store received over ${seller.thisMonth.clicks.toLocaleString('en-IN')} clicks this month, but orders fell to ${seller.thisMonth.orders}. Have you noticed customers dropping off without completing purchases on your product pages?`;
+      } else if (seller.scenarioType === 'healthy_growth') {
+        return `Actually, ${seller.name.split(' ')[0]}, your numbers are looking phenomenal with sales up ${deltas.salesChangePct} percent to ₹${seller.thisMonth.sales.toLocaleString('en-IN')}! Were you looking to scale up inventory or enroll in our festive promotions?`;
+      } else if (seller.scenarioType === 'asp_erosion') {
+        return `Your order count is steady at ${seller.thisMonth.orders}, but your average selling price dropped from ₹${seller.lastMonth.avgSellingPrice} down to ₹${seller.thisMonth.avgSellingPrice}. Have you been discounting heavily to match competitor prices?`;
+      } else {
+        return `I can see your monthly orders dropped from ${seller.lastMonth.orders} to ${seller.thisMonth.orders}, and sales fell to ₹${seller.thisMonth.sales.toLocaleString('en-IN')}. Have you noticed any of your top-selling products going out of stock recently?`;
+      }
     }
   }
 
+  // STAGE 3: Root Cause Diagnosis
   if (
     lastMsg.includes('stock') ||
     lastMsg.includes('inventory') ||
-    lastMsg.includes('product') ||
     lastMsg.includes('yes') ||
-    lastMsg.includes('many')
+    lastMsg.includes('why') ||
+    lastMsg.includes('reason') ||
+    lastMsg.includes('return') ||
+    lastMsg.includes('traffic') ||
+    lastMsg.includes('impression') ||
+    lastMsg.includes('bad') ||
+    lastMsg.includes('situation')
   ) {
-    if (!historyText.includes('downward spiral') && !historyText.includes('algorithm')) {
-      return "Rajesh, looking at your data, your out-of-stock products jumped from 5 to 18, and your cancellation rate climbed to 14 percent. When stockouts and cancellations rise, Snapdeal's search algorithm reduces your listing visibility, creating a downward spiral.";
+    if (!historyText.includes('first') && !historyText.includes('recommend')) {
+      return analytics.diagnosis;
     }
   }
 
+  // STAGE 4: Recommendations
   if (
     lastMsg.includes('what should i do') ||
     lastMsg.includes('recommend') ||
     lastMsg.includes('how to fix') ||
     lastMsg.includes('solution') ||
     lastMsg.includes('action') ||
-    lastMsg.includes('cancellation') ||
-    lastMsg.includes('what to do')
+    lastMsg.includes('what to do') ||
+    lastMsg.includes('steps')
   ) {
-    return "First, restock those 18 out-of-stock products within the next 48 hours to stop losing orders. Second, investigate cancellation reasons in your dashboard and connect with our priority logistics partner. Third, run a 7-day promotional discount of 10 to 15 percent on your top 5 products to quickly rebuild visibility.";
+    return `First, ${analytics.recommendations[0].toLowerCase()} Second, ${analytics.recommendations[1].toLowerCase()} Third, ${analytics.recommendations[2].toLowerCase()}`;
   }
 
+  // STAGE 5: Summary & Recap
   if (
     lastMsg.includes('summary') ||
     lastMsg.includes('recap') ||
@@ -60,9 +151,10 @@ function getDeterministicResponse(
     lastMsg.includes('understand') ||
     lastMsg.includes('next steps')
   ) {
-    return "To summarize today's call, Rajesh: your 33 percent sales drop was caused by 13 new stockouts and cancellations rising to 14 percent. Your three priorities are restocking within 48 hours, checking cancellation reasons in your dashboard, and running a short discount campaign. I've sent these recommendations to your registered Snapdeal email as well. Is there anything else I can help you with?";
+    return `${analytics.summary} I have sent these exact action items to your registered Snapdeal email. Is there anything else I can clarify for you today?`;
   }
 
+  // Closing
   if (
     lastMsg.includes('thank') ||
     lastMsg.includes('bye') ||
@@ -71,28 +163,35 @@ function getDeterministicResponse(
     lastMsg.includes('all good') ||
     lastMsg.includes('done')
   ) {
-    return "Wonderful, Rajesh! I'm confident these steps will help you recover your sales quickly. Don't hesitate to reach back out to Snapdeal seller support anytime. Have a great day!";
+    return `Wonderful, ${seller.name.split(' ')[0]}! I'm confident these steps will help you achieve great results. Don't hesitate to reach back out to Snapdeal seller support anytime. Have a wonderful day!`;
   }
 
-  // Default empathetic response moving conversation forward
-  return "Rajesh, our data shows 18 products currently out of stock and a 14 percent cancellation rate costing you 65,000 rupees this month. I recommend immediately restocking your top inventory and launching a 10 to 15 percent promotion on your top products to recover algorithm ranking.";
+  // General default grounded in analytics
+  return `${seller.name.split(' ')[0]}, ${analytics.diagnosis} I recommend reviewing your dashboard metrics and implementing our recovery steps to regain algorithm ranking.`;
 }
 
 export async function POST(req: NextRequest) {
   let activeAssistantName: KAMName = 'Priya';
+  let activeSellerId = 'SD001';
+
   try {
     const body = await req.json();
     const {
       messages,
       apiKey: clientApiKey,
       assistantName,
+      sellerId,
     } = body as {
       messages: { role: 'user' | 'assistant'; content: string }[];
       apiKey?: string;
       assistantName?: KAMName;
+      sellerId?: string;
     };
 
     if (assistantName === 'Rahul') activeAssistantName = 'Rahul';
+    if (sellerId && MOCK_SELLERS[sellerId.toUpperCase()]) {
+      activeSellerId = sellerId.toUpperCase();
+    }
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: 'Messages array is required' }, { status: 400 });
@@ -100,30 +199,33 @@ export async function POST(req: NextRequest) {
 
     const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
 
-    // If no API key is provided, use deterministic fallback with high accuracy
+    // Use dynamic fallback if Gemini API key is missing or dummy
     if (!apiKey || apiKey.trim() === '' || apiKey.includes('your-google-gemini-api-key-here')) {
-      const fallbackReply = getDeterministicResponse(messages, activeAssistantName);
+      const fallbackReply = getDynamicFallbackResponse(messages, activeAssistantName, activeSellerId);
       return NextResponse.json({
         text: fallbackReply,
         source: 'deterministic-fallback',
         assistantName: activeAssistantName,
+        sellerId: activeSellerId,
         note: 'Using built-in dialog engine. Add GEMINI_API_KEY in .env.local for live Gemini AI calls.',
       });
     }
 
+    // Call Google Gemini with function calling
     const genAI = new GoogleGenerativeAI(apiKey);
     const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
     const model = genAI.getGenerativeModel({
       model: modelName,
-      systemInstruction: getSystemPrompt(activeAssistantName),
+      systemInstruction: getSystemPrompt(activeAssistantName, activeSellerId),
+      tools,
       generationConfig: {
-        maxOutputTokens: 180,
+        maxOutputTokens: 220,
         temperature: 0.7,
       },
     });
 
-    // Format history for Gemini SDK
+    // Format chat history
     const history = messages.slice(0, -1).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }],
@@ -132,32 +234,70 @@ export async function POST(req: NextRequest) {
     const chat = model.startChat({ history });
     const lastMsg = messages[messages.length - 1];
 
-    const result = await chat.sendMessage(lastMsg.content);
-    let text = result.response.text();
+    let result = await chat.sendMessage(lastMsg.content);
+    let candidate = result.response;
 
-    // Clean any unwanted markdown asterisks or bullet formatting to guarantee natural voice
+    // Handle function calls loop (Gemini calling tools)
+    let functionCalls = candidate.functionCalls();
+    while (functionCalls && functionCalls.length > 0) {
+      const functionResponses = [];
+
+      for (const call of functionCalls) {
+        const targetSeller = (call.args as any)?.sellerId || activeSellerId;
+        let fnResult: any;
+
+        if (call.name === 'get_seller_profile') {
+          fnResult = getSellerById(targetSeller);
+        } else if (call.name === 'get_seller_products') {
+          fnResult = getSellerProducts(targetSeller);
+        } else if (call.name === 'get_seller_analytics') {
+          fnResult = getSellerAnalytics(targetSeller);
+        } else {
+          fnResult = { error: `Function ${call.name} unknown` };
+        }
+
+        functionResponses.push({
+          functionResponse: {
+            name: call.name,
+            response: { result: fnResult },
+          },
+        });
+      }
+
+      // Send tool results back to Gemini
+      result = await chat.sendMessage(functionResponses);
+      candidate = result.response;
+      functionCalls = candidate.functionCalls();
+    }
+
+    let text = candidate.text();
     text = text.replace(/[*#_`]/g, '').trim();
 
-    return NextResponse.json({ text, source: 'gemini', assistantName: activeAssistantName });
+    return NextResponse.json({
+      text,
+      source: 'gemini-function-calling',
+      assistantName: activeAssistantName,
+      sellerId: activeSellerId,
+    });
   } catch (error: any) {
     console.error('[chat API error]', error);
 
-    // If Gemini fails, fallback gracefully
+    // If Gemini fails (e.g. quota limit, timeout), seamlessly fall back to dynamic engine
     try {
-      const body = await req.json().catch(() => null);
-      const messages = body?.messages || [];
-      const fallbackReply = getDeterministicResponse(messages, activeAssistantName);
+      const fallbackReply = getDynamicFallbackResponse(
+        req ? [] : [],
+        activeAssistantName,
+        activeSellerId
+      );
       return NextResponse.json({
         text: fallbackReply,
         source: 'error-fallback',
         assistantName: activeAssistantName,
-        warning: error?.message || 'Gemini error, used fallback response',
+        sellerId: activeSellerId,
+        warning: error?.message || 'Gemini error, used dynamic fallback',
       });
     } catch {
-      return NextResponse.json(
-        { error: error?.message || 'Chat failed' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error?.message || 'Chat failed' }, { status: 500 });
     }
   }
 }

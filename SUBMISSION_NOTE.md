@@ -2,118 +2,107 @@
 
 **Candidate:** AI First Intern Candidate  
 **Project:** Snapdeal Virtual Key Account Manager (Voice KAM)  
-**Target Scenario:** Seller Rajesh Sharma (Rajesh Electronics) calling regarding a 33% monthly sales decline  
+**Target Scenario:** Multi-Seller Voice Assistant (10 Distinct Business Scenarios & Categories)  
 
 ---
 
 ## 1. Executive Summary
 
-This project implements a real-time, browser-native **AI Voice Key Account Manager (Priya)** designed for Snapdeal sellers. When seller **Rajesh Sharma** reaches out concerned about dropping sales, Priya conducts a natural two-way voice call. She analyzes the account's historical metrics against the current month, diagnoses the underlying bottlenecks (inventory stockouts and spike in cancellation rate leading to search algorithm demotion), recommends 3 concrete, high-impact recovery actions, and summarizes the next steps.
+This project implements an enterprise-ready, browser-native **AI Voice Key Account Manager (Priya / Rahul)** for Snapdeal sellers. Unlike basic chatbots that hardcode seller numbers, this system features a **dynamic function calling architecture** powered by **Google Gemini 1.5 Flash** and an integrated mock dataset of **10 realistic sellers (`SD001` through `SD010`)**. 
+
+Each seller exhibits a distinct business bottleneck—including inventory stockouts, high return rates, visibility collapse, poor conversions, and logistics cancellations. The Virtual KAM dynamically queries seller data through function calls (`get_seller_profile`, `get_seller_products`, `get_seller_analytics`) and delivers tailored, data-grounded voice advice without mixing seller accounts.
 
 ---
 
-## 2. Key Architecture Decisions & Tech Stack
+## 2. Multi-Seller Dataset & Scenario Matrix
 
-| Component | Technology | Rationale & Trade-offs | Cost |
-| :--- | :--- | :--- | :--- |
-| **Fullstack Framework** | **Next.js 14 (App Router, TypeScript)** | Unified frontend + serverless API route (`/api/chat`). Zero backend server maintenance, high performance, and rapid deployment. | Free / Open-source |
-| **LLM & Reasoning** | **Google Gemini 1.5 Flash (`@google/generative-ai`)** | Ultra-low latency (~300-500ms TTFT), generous free tier (1,500 req/day), superior instruction following for strict conversational limits (2-3 sentences max). | Free tier |
-| **Speech-to-Text (STT)** | **Browser Web Speech API (`SpeechRecognition`)** | Real-time on-device/browser audio streaming. Automatically detects silence endpoints (`onend`), requires zero external audio uploads, zero API latency, and zero audio processing costs. Supports `en-IN` (Indian English). | Free / 0 API calls |
-| **Text-to-Speech (TTS)** | **Browser `SpeechSynthesis` API** | Native speech synthesis with zero streaming latency. Configured with natural Indian English female voice profile (`en-IN`, rate `0.95`, pitch `1.05`), with fallbacks across Chrome and Edge. | Free / 0 API calls |
-| **Styling & UI** | **Tailwind CSS + Lucide Icons** | Pixel-perfect Snapdeal branding (`#e40046`), responsive layout, live metrics dashboard drawer, dynamic audio pulse animations, and real-time chat transcript. | Free / Open-source |
+| Seller ID | Seller Name | Store Name | Category | Primary Business Scenario & Bottleneck |
+| :---: | :--- | :--- | :--- | :--- |
+| **SD001** | **Rajesh Sharma** | Rajesh Electronics | Electronics & Accessories | **Original Assignment Data:** 18 stockouts + 14% cancellation spike triggering algorithm demotion. |
+| **SD002** | Pooja Gupta | Vastra Trends | Fashion & Ethnic Apparel | **High Return Rate (28%):** Buyer returns surging due to incorrect kurti size charts. |
+| **SD003** | Amit Verma | HomeCraft Living | Home & Kitchen | **Low Visibility (-76% Impressions):** Expired promotion tags and zero keyword bidding. |
+| **SD004** | Neha Kapoor | GlowNatural Beauty | Beauty & Personal Care | **Poor Conversion (2.7%):** High clicks (4,800) but low buyer trust; lacks photo reviews and bundles. |
+| **SD005** | Vikas Malhotra | StepUp Footwear | Footwear & Athletic Shoes | **Hero SKU Stockout:** Top 2 running shoes out of stock in sizes 8 & 9, cutting revenue by 54%. |
+| **SD006** | Sunita Rao | Prakriti Organics | Gourmet & Organic Staples | **Logistics SLA Spike (23% Cancellations):** Regional warehouse courier pickup backlog. |
+| **SD007** | Karan Mehta | IronGrip Fitness | Sports & Home Fitness | **Healthy Growth (+40% Sales):** Low returns (3.0%), ready for Snapdeal Gold Tier & bundles. |
+| **SD008** | Deepak Patel | GizmoWorld Accessories | Mobile Accessories | **Severe ASP Erosion (-43%):** Aggressive price wars with unauthorized gray-market sellers. |
+| **SD009** | Meera Joshi | Vidya Books & Stationers | Books & Exam Stationery | **Ad Inefficiency:** Broad keyword bidding drains ad budget on casual non-converting traffic. |
+| **SD010** | Ananya Singhal | Aashirwad Traditional Jewelry | Fashion Jewelry | **Post-Festive Slump & 74% Cart Abandonment:** Over-reliance on heavy bridal sets. |
 
 ---
 
-## 3. End-to-End Workflow & Data Pipeline
+## 3. Dynamic Tool & Function Calling Architecture
+
+To satisfy strict prompt decoupling guidelines, **zero seller metrics are hardcoded into the Gemini system prompt**. Instead, Gemini interacts with the seller repository via real-time function declarations:
 
 ```
 +---------------------------------------------------------------------------------------+
 |                                    BROWSER CLIENT                                     |
 |                                                                                       |
 |   +-------------------+       User speaks      +----------------------------------+   |
-|   | Rajesh Sharma     | ---------------------> | SpeechRecognition (STT)          |   |
-|   | (Seller)          |                        | - lang: 'en-IN'                  |   |
-|   +-------------------+                        | - continuous: false              |   |
-|             ^                                  +----------------------------------+   |
-|             |                                                   |                     |
-|             | Audio playback                                    | Spoken transcript   |
-|             |                                                   v                     |
-|   +-------------------+     Bot text string    +----------------------------------+   |
-|   | SpeechSynthesis   | <--------------------- | VoiceBot.tsx (React State Ref)   |   |
-|   | (TTS - Priya)     |                        | - Manages conversation history   |   |
-|   +-------------------+                        | - Controls Mic / Audio visualizer|   |
-|                                                +----------------------------------+   |
+|   | Active Seller     | ---------------------> | Web Speech STT (Indian English)  |   |
+|   | (SD001 - SD010)   |                        +----------------------------------+   |
+|   +-------------------+                                         |                     |
+|             ^                                                   | Spoken transcript   |
+|             | Audio playback                                    v                     |
+|   +-------------------+     Spoken text        +----------------------------------+   |
+|   | SpeechSynthesis   | <--------------------- | VoiceBot.tsx (React State)       |   |
+|   | (Priya / Rahul)   |                        | - Selected Seller: SD001..SD010  |   |
+|   +-------------------+                        +----------------------------------+   |
 +-----------------------------------------------------------------|---------------------+
                                                                   |
-                                              POST /api/chat      | Messages History
+                                    POST /api/chat with sellerId  |
                                                                   v
 +---------------------------------------------------------------------------------------+
 |                                   NEXT.JS BACKEND                                     |
 |                                                                                       |
 |   +-------------------------------------------------------------------------------+   |
 |   | /api/chat/route.ts                                                            |   |
-|   | - Injects System Prompt (lib/system-prompt.ts)                                |   |
-|   | - Supplies Seller Context & Computations (lib/seller-data.ts)                 |   |
-|   | - Executes Google Gemini 1.5 Flash model.startChat()                          |   |
-|   | - Includes deterministic dialog engine fallback (100% testable out-of-the-box)|   |
+|   | - System Prompt (Voice rules, zero hardcoded numbers)                         |   |
+|   | - Google Gemini 1.5 Flash Model                                               |   |
 |   +-------------------------------------------------------------------------------+   |
 |                                          |                                            |
-+------------------------------------------|--------------------------------------------+
-                                           v
-                       +----------------------------------------+
-                       | Google Gemini 1.5 Flash (AI Studio)   |
-                       | - Enforces 2-3 sentence brevity rule   |
-                       | - Applies 5-stage advisory protocol    |
-                       +----------------------------------------+
+|                                          | Gemini emits Function Call                 |
+|                                          v                                            |
+|                       +---------------------------------------+                       |
+|                       | Function Calling Dispatcher           |                       |
+|                       | - get_seller_profile(sellerId)        |                       |
+|                       | - get_seller_products(sellerId)       |                       |
+|                       | - get_seller_analytics(sellerId)      |                       |
+|                       +---------------------------------------+                       |
+|                                          |                                            |
+|                                          | Evaluated against Deterministic Engine     |
+|                                          v                                            |
+|                       +---------------------------------------+                       |
+|                       | lib/seller-data.ts                    |                       |
+|                       | - 10 Sellers, 40 SKUs, Variance Math  |                       |
+|                       +---------------------------------------+                       |
+|                                          |                                            |
+|                                          | Function Response fed back to Gemini       |
+|                                          v                                            |
+|                       +---------------------------------------+                       |
+|                       | Gemini Formulates Grounded Spoken Turn|                       |
+|                       +---------------------------------------+                       |
++---------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 4. Seller Data Diagnosis & Mathematical Analysis
+## 4. REST API Infrastructure
 
-Based on the mock dataset provided in the assignment:
+The backend exposes dedicated endpoints to inspect seller data, catalogs, and analytics:
 
-| Metric | Last Month | This Month | Delta | Strategic Diagnosis |
-| :--- | :--- | :--- | :--- | :--- |
-| **Sales** | ₹2,00,000 | ₹1,35,000 | **-₹65,000 (-32.5% ≈ -33%)** | Severe top-line contraction requiring urgent intervention. |
-| **Orders** | 400 orders | 270 orders | **-130 orders (-32.5% ≈ -33%)** | Order volume drop correlates exactly with sales decline. |
-| **Average Selling Price** | ₹500 | ₹500 | **₹0 (0% change)** | **Pricing is NOT the issue.** Seller should not initiate price wars. |
-| **Out-of-Stock SKUs** | 5 | 18 | **+13 products (+260%)** | **Primary root cause.** Each out-of-stock SKU loses ~4-5 orders/day. |
-| **Cancellation Rate** | 8% | 14% | **+6 pp (+75% relative spike)** | **Secondary root cause.** High cancellations trigger Snapdeal algorithm penalties, slashing catalog search visibility. |
-
-### The Root Cause: The "Visibility Death Spiral"
-1. **Stockouts:** 13 key SKUs went out of stock, causing direct lost orders.
-2. **Cancellations:** Fulfillments faltered, pushing cancellations to an unacceptable 14%.
-3. **Algorithm Reaction:** The Snapdeal marketplace algorithm demotes listings with high cancellation and stockout rates to preserve customer trust.
-4. **Result:** Catalog impressions collapse, causing even the in-stock items to receive fewer views and fewer sales.
+- `GET /api/sellers`: Returns list of all 10 sellers with store details, scenario types, and current sales.
+- `GET /api/sellers?id=SD001`: Returns full seller profile, historical comparison metrics, product catalog, and computed analytics.
+- `GET /api/sellers?id=SD001&type=products`: Returns the active seller's 3–5 catalog items with SKU IDs, prices, and stock status.
+- `GET /api/sellers?id=SD001&type=analytics`: Returns computed deltas, identified bottlenecks, root cause diagnosis, and prioritized action items.
 
 ---
 
-## 5. The 5-Stage Conversation Protocol
+## 5. Automated Verification & Isolation Proof
 
-The virtual KAM follows a structured consultation flow tailored for phone/voice calls:
-
-1. **Stage 1 — Warm Greeting & Account Acknowledgement:**  
-   Welcomes Rajesh by name, mentions that she can see recent account movements, and asks open-ended questions about his primary concern.
-2. **Stage 2 — Active Listening & Targeted Inquiry:**  
-   Validates the seller's emotion, cross-references his remarks with the live order drops, and investigates inventory availability.
-3. **Stage 3 — Clear & Empathetic Diagnosis:**  
-   Explains the connection between the 18 stockouts, the 14% cancellation spike, and the Snapdeal search ranking algorithm visibility penalty.
-4. **Stage 4 — Three Practical Action Items:**  
-   - **Urgent Restock (Next 48 Hours):** Replenish the 18 depleted SKUs to immediately recapture 4-5 lost orders per product per day.  
-   - **Fulfillment Audit:** Review seller dashboard cancellation reasons and connect with Snapdeal's priority logistics partner to eliminate shipping delays.  
-   - **7-Day Algorithmic Kickstart:** Run a targeted 10% to 15% promotional campaign on the top 5 SKUs to revive buyer traffic and search impressions.  
-5. **Stage 5 — Summary & Closure:**  
-   Concise recap of the 3 action items, email confirmation dispatch, and a reassuring closing statement.
-
----
-
-## 6. Voice UX Guardrails & Prompt Engineering
-
-To guarantee a frictionless voice experience, the system prompt enforces:
-- **Strict Brevity:** Maximum 2-3 short spoken sentences per turn. Spoken text over 3 sentences overwhelms the listener.
-- **Natural Spoken Phrasing:** Explicitly forbids bullet points, asterisks, numbered headers, and markdown.
-- **Localized Cultural Phrasing:** Uses "rupees", Indian number formatting (e.g., 1,35,000), and references to the "Snapdeal Seller Dashboard".
-- **Turn-taking Integrity:** Only one single question asked per turn to encourage natural conversational rhythm.
-- **Graceful Fallback:** If microphone permission is restricted or browser STT is unsupported, an integrated quick-prompt chip bar and text box allow seamless testing without breaking the voice synthesis.
-
+The test suite (`node test_multi_seller.mjs`) proves:
+1. **10 Distinct Sellers:** All 10 sellers load with unique IDs, correct store names, and scenario tags.
+2. **SD001 Data Integrity:** Original assignment figures (Sales ₹2,00,000 &rarr; ₹1,35,000; Orders 400 &rarr; 270; Cancellations 8% &rarr; 14%; Stockouts 5 &rarr; 18) remain 100% intact.
+3. **SKU Uniqueness:** All 40 products have globally unique SKU IDs with stock tracking.
+4. **Zero Data Leakage:** Switching between SD001, SD002, SD003, and SD007 retrieves only that seller's name, category, and bottleneck in voice responses without cross-contamination.
