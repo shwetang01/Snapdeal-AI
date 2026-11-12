@@ -64,115 +64,134 @@ const tools: any = [
   },
 ];
 
-// Dynamic dialog engine fallback that inspects active seller data deterministically
+// Resilient dynamic dialog engine fallback that inspects active seller data deterministically
 function getDynamicFallbackResponse(
   messages: { role: string; content: string }[],
   assistantName: KAMName = 'Priya',
   sellerId: string = 'SD001'
 ): string {
-  const lastMsg = (messages[messages.length - 1]?.content || '').toLowerCase();
+  const lastMsg = (messages[messages.length - 1]?.content || '').toLowerCase().trim();
   const historyText = messages.map((m) => m.content.toLowerCase()).join(' ');
 
   const seller = getSellerById(sellerId) || MOCK_SELLERS.SD001;
   const analytics = getSellerAnalytics(seller.sellerId);
   const deltas = computeSellerDeltas(seller);
   const name = assistantName === 'Rahul' ? 'Rahul' : 'Priya';
+  const firstName = seller.name.split(' ')[0];
 
-  // STAGE 1: Greeting
-  if (lastMsg.includes('[call_started]') || messages.length <= 1) {
-    return `Hello ${seller.name.split(' ')[0]}! This is ${name} calling from Snapdeal. I'm really glad you reached out, as I can already see some notable shifts in your store performance this month. What has been worrying you the most?`;
+  // STAGE 1: Greeting - ONLY triggered if call just started or it's the very first turn
+  if (lastMsg.includes('[call_started]') || (messages.length === 1 && messages[0].content.includes('[call_started]'))) {
+    return `Hello ${firstName}! This is ${name} calling from Snapdeal. I'm really glad you reached out, as I can already see some notable shifts in your store performance this month. What has been worrying you the most?`;
   }
 
-  // STAGE 2: Active Listening / Inquiries
+  // Combined Root Cause + Improvements ("what is the main problem and how can i improve")
   if (
+    (lastMsg.includes('problem') || lastMsg.includes('issue') || lastMsg.includes('why') || lastMsg.includes('reason') || lastMsg.includes('what happened')) &&
+    (lastMsg.includes('improve') || lastMsg.includes('fix') || lastMsg.includes('do') || lastMsg.includes('solution') || lastMsg.includes('better'))
+  ) {
+    if (seller.scenarioType === 'high_returns') {
+      return `${firstName} ji, the main problem is your return rate spiked to ${seller.thisMonth.returnRate} percent due to kurti sizing mismatches. To improve, we should immediately update your size charts with exact bust measurements and add fabric care notes.`;
+    } else if (seller.scenarioType === 'low_visibility') {
+      return `${firstName} ji, your main issue is a 76 percent drop in search impressions due to expired promotion tags. To improve this, re-enroll your top kitchenware in festive flash sales and enable Snapdeal automatic keyword bidding.`;
+    } else {
+      return `${firstName} ji, the main problem is that your 18 stockouts caused Snapdeal's ranking algorithm to demote your listings, while cancellations doubled to 14 percent. To improve this, prioritize restocking your top 2 fast chargers immediately and enable same-day dispatch.`;
+    }
+  }
+
+  // Problem / Issue / Bottleneck / Why / Drop inquiry / Inquiries
+  if (
+    lastMsg.includes('problem') ||
+    lastMsg.includes('issue') ||
+    lastMsg.includes('bottleneck') ||
+    lastMsg.includes('why') ||
+    lastMsg.includes('what happened') ||
+    lastMsg.includes('wrong') ||
+    lastMsg.includes('reason') ||
     lastMsg.includes('sales') ||
     lastMsg.includes('drop') ||
     lastMsg.includes('fell') ||
     lastMsg.includes('decline') ||
-    lastMsg.includes('help') ||
-    lastMsg.includes('worry') ||
-    lastMsg.includes('orders') ||
-    lastMsg.includes('concern')
-  ) {
-    if (!historyText.includes('noticed') && !historyText.includes('factor')) {
-      if (seller.scenarioType === 'high_returns') {
-        return `I can see you maintained good volume with ${seller.thisMonth.orders} orders, but your returns climbed steeply to ${seller.thisMonth.returnRate} percent. Have customers reached out with sizing or fabric concerns on your kurti listings?`;
-      } else if (seller.scenarioType === 'low_visibility') {
-        return `I noticed your monthly orders dropped to ${seller.thisMonth.orders}, while conversion stayed strong at ${seller.thisMonth.conversionRate} percent. Have you checked whether your search impressions and traffic dropped recently?`;
-      } else if (seller.scenarioType === 'poor_conversion') {
-        return `I see your store received over ${seller.thisMonth.clicks.toLocaleString('en-IN')} clicks this month, but orders fell to ${seller.thisMonth.orders}. Have you noticed customers dropping off without completing purchases on your product pages?`;
-      } else if (seller.scenarioType === 'healthy_growth') {
-        return `Actually, ${seller.name.split(' ')[0]}, your numbers are looking phenomenal with sales up ${deltas.salesChangePct} percent to ₹${seller.thisMonth.sales.toLocaleString('en-IN')}! Were you looking to scale up inventory or enroll in our festive promotions?`;
-      } else if (seller.scenarioType === 'asp_erosion') {
-        return `Your order count is steady at ${seller.thisMonth.orders}, but your average selling price dropped from ₹${seller.lastMonth.avgSellingPrice} down to ₹${seller.thisMonth.avgSellingPrice}. Have you been discounting heavily to match competitor prices?`;
-      } else {
-        return `I can see your monthly orders dropped from ${seller.lastMonth.orders} to ${seller.thisMonth.orders}, and sales fell to ₹${seller.thisMonth.sales.toLocaleString('en-IN')}. Have you noticed any of your top-selling products going out of stock recently?`;
-      }
-    }
-  }
-
-  // STAGE 3: Root Cause Diagnosis
-  if (
+    lastMsg.includes('down') ||
     lastMsg.includes('stock') ||
     lastMsg.includes('inventory') ||
-    lastMsg.includes('yes') ||
-    lastMsg.includes('why') ||
-    lastMsg.includes('reason') ||
-    lastMsg.includes('return') ||
-    lastMsg.includes('traffic') ||
-    lastMsg.includes('impression') ||
-    lastMsg.includes('bad') ||
-    lastMsg.includes('situation')
+    lastMsg.includes('worry') ||
+    lastMsg.includes('orders') ||
+    lastMsg.includes('cancellation') ||
+    lastMsg.includes('return')
   ) {
-    if (!historyText.includes('first') && !historyText.includes('recommend')) {
-      return analytics.diagnosis;
-    }
+    return `${firstName} ji, ${analytics.diagnosis}`;
   }
 
-  // STAGE 4: Recommendations
+  // Recommendations / Improvements / Solutions / Actions
   if (
-    lastMsg.includes('what should i do') ||
+    lastMsg.includes('improve') ||
+    lastMsg.includes('fix') ||
     lastMsg.includes('recommend') ||
-    lastMsg.includes('how to fix') ||
+    lastMsg.includes('what should i do') ||
+    lastMsg.includes('how to') ||
     lastMsg.includes('solution') ||
     lastMsg.includes('action') ||
-    lastMsg.includes('what to do') ||
-    lastMsg.includes('steps')
+    lastMsg.includes('steps') ||
+    lastMsg.includes('suggestion') ||
+    lastMsg.includes('how can i')
   ) {
-    return `First, ${analytics.recommendations[0].toLowerCase()} Second, ${analytics.recommendations[1].toLowerCase()} Third, ${analytics.recommendations[2].toLowerCase()}`;
+    return `Here are the top recovery steps for ${seller.store}: First, ${analytics.recommendations[0].toLowerCase()} Second, ${analytics.recommendations[1].toLowerCase()} Third, ${analytics.recommendations[2].toLowerCase()}`;
   }
 
-  // STAGE 5: Summary & Recap
+  // Objections / Capital pushback
+  if (
+    lastMsg.includes('capital') ||
+    lastMsg.includes('money') ||
+    lastMsg.includes('funds') ||
+    lastMsg.includes('expensive') ||
+    lastMsg.includes('cannot') ||
+    lastMsg.includes("can't") ||
+    lastMsg.includes('cost') ||
+    lastMsg.includes('block') ||
+    lastMsg.includes('budget') ||
+    lastMsg.includes('hard') ||
+    lastMsg.includes('difficult')
+  ) {
+    return `I completely understand your working capital concern, ${firstName} ji. Instead of stocking all SKUs, let's focus only on your top 2 fastest-selling items. That requires minimal capital while recovering over 80 percent of your lost sales.`;
+  }
+
+  // Summary / Agreement / Next Steps / OK
   if (
     lastMsg.includes('summary') ||
     lastMsg.includes('recap') ||
     lastMsg.includes('summarize') ||
-    lastMsg.includes('clear') ||
+    lastMsg.includes('ok') ||
+    lastMsg.includes('okay') ||
+    lastMsg.includes('agree') ||
+    lastMsg.includes('sure') ||
+    lastMsg.includes('fine') ||
+    lastMsg.includes('done') ||
+    lastMsg.includes('next steps') ||
     lastMsg.includes('understand') ||
-    lastMsg.includes('next steps')
+    lastMsg.includes('noted')
   ) {
-    return `${analytics.summary} I have sent these exact action items to your registered Snapdeal email. Is there anything else I can clarify for you today?`;
+    return `${analytics.summary} I have noted your commitments and will check your store metrics again in 7 days. Is there anything else I can assist you with today?`;
   }
 
-  // Closing
+  // Polite closing
   if (
     lastMsg.includes('thank') ||
     lastMsg.includes('bye') ||
     lastMsg.includes('nothing') ||
     lastMsg.includes('no') ||
-    lastMsg.includes('all good') ||
-    lastMsg.includes('done')
+    lastMsg.includes('all good')
   ) {
-    return `Wonderful, ${seller.name.split(' ')[0]}! I'm confident these steps will help you achieve great results. Don't hesitate to reach back out to Snapdeal seller support anytime. Have a wonderful day!`;
+    return `Wonderful, ${firstName} ji! I'm confident these adjustments will restore your growth on Snapdeal. Have a great day and happy selling!`;
   }
 
-  // General default grounded in analytics
-  return `${seller.name.split(' ')[0]}, ${analytics.diagnosis} I recommend reviewing your dashboard metrics and implementing our recovery steps to regain algorithm ranking.`;
+  // Grounded Default - NEVER repeats greeting if conversation has started
+  return `${firstName} ji, ${analytics.diagnosis} To improve your performance, I strongly recommend: ${analytics.recommendations[0]}.`;
 }
 
 export async function POST(req: NextRequest) {
   let activeAssistantName: KAMName = 'Priya';
   let activeSellerId = 'SD001';
+  let incomingMessages: { role: string; content: string }[] = [];
 
   try {
     const body = await req.json();
@@ -181,33 +200,29 @@ export async function POST(req: NextRequest) {
       apiKey: clientApiKey,
       assistantName,
       sellerId,
-    } = body as {
-      messages: { role: 'user' | 'assistant'; content: string }[];
-      apiKey?: string;
-      assistantName?: KAMName;
-      sellerId?: string;
-    };
+    } = body;
+
+    incomingMessages = Array.isArray(messages) ? messages : [];
 
     if (assistantName === 'Rahul') activeAssistantName = 'Rahul';
     if (sellerId && MOCK_SELLERS[sellerId.toUpperCase()]) {
       activeSellerId = sellerId.toUpperCase();
     }
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    if (!incomingMessages || incomingMessages.length === 0) {
       return NextResponse.json({ error: 'Messages array is required' }, { status: 400 });
     }
 
-    const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
+    const apiKey = (clientApiKey || process.env.GEMINI_API_KEY || '').trim();
 
     // Use dynamic fallback if Gemini API key is missing or dummy
-    if (!apiKey || apiKey.trim() === '' || apiKey.includes('your-google-gemini-api-key-here')) {
-      const fallbackReply = getDynamicFallbackResponse(messages, activeAssistantName, activeSellerId);
+    if (!apiKey || apiKey.includes('your-google-gemini-api-key-here')) {
+      const fallbackReply = getDynamicFallbackResponse(incomingMessages, activeAssistantName, activeSellerId);
       return NextResponse.json({
         text: fallbackReply,
         source: 'deterministic-fallback',
         assistantName: activeAssistantName,
         sellerId: activeSellerId,
-        note: 'Using built-in dialog engine. Add GEMINI_API_KEY in .env.local for live Gemini AI calls.',
       });
     }
 
@@ -225,21 +240,23 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Format chat history
-    const history = messages.slice(0, -1).map((m) => ({
+    // Format chat history, alternating user and model
+    const history = incomingMessages.slice(0, -1).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }],
     }));
 
     const chat = model.startChat({ history });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = incomingMessages[incomingMessages.length - 1];
 
     let result = await chat.sendMessage(lastMsg.content);
     let candidate = result.response;
 
     // Handle function calls loop (Gemini calling tools)
     let functionCalls = candidate.functionCalls();
-    while (functionCalls && functionCalls.length > 0) {
+    let loopCount = 0;
+    while (functionCalls && functionCalls.length > 0 && loopCount < 3) {
+      loopCount++;
       const functionResponses = [];
 
       for (const call of functionCalls) {
@@ -270,8 +287,20 @@ export async function POST(req: NextRequest) {
       functionCalls = candidate.functionCalls();
     }
 
-    let text = candidate.text();
-    text = text.replace(/[*#_`]/g, '').trim();
+    let text = '';
+    try {
+      text = candidate.text();
+    } catch {
+      // Fallback extraction if candidate.text() cannot be read directly
+      const parts = (candidate as any)?.candidates?.[0]?.content?.parts || [];
+      text = parts.map((p: any) => p.text || '').filter(Boolean).join(' ');
+    }
+
+    if (!text || text.trim() === '') {
+      text = getDynamicFallbackResponse(incomingMessages, activeAssistantName, activeSellerId);
+    } else {
+      text = text.replace(/[*#_`]/g, '').trim();
+    }
 
     return NextResponse.json({
       text,
@@ -280,12 +309,12 @@ export async function POST(req: NextRequest) {
       sellerId: activeSellerId,
     });
   } catch (error: any) {
-    console.error('[chat API error]', error);
+    console.error('[chat API error]', error?.message || error);
 
-    // If Gemini fails (e.g. quota limit, timeout), seamlessly fall back to dynamic engine
+    // If Gemini fails (e.g. quota limit, network, timeout), seamlessly fall back to dynamic engine
     try {
       const fallbackReply = getDynamicFallbackResponse(
-        req ? [] : [],
+        incomingMessages,
         activeAssistantName,
         activeSellerId
       );
@@ -294,9 +323,9 @@ export async function POST(req: NextRequest) {
         source: 'error-fallback',
         assistantName: activeAssistantName,
         sellerId: activeSellerId,
-        warning: error?.message || 'Gemini error, used dynamic fallback',
+        warning: error?.message || 'Used dynamic fallback',
       });
-    } catch {
+    } catch (fallbackErr: any) {
       return NextResponse.json({ error: error?.message || 'Chat failed' }, { status: 500 });
     }
   }
