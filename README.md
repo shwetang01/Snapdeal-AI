@@ -14,6 +14,12 @@ Built for the **Snapdeal AI First Intern Practical Assignment**.
 
 ---
 
+## 📌 Project Resources
+- 🚀 **GitHub Repository:** [https://github.com/shwetang01/Snapdeal-AI](https://github.com/shwetang01/Snapdeal-AI)
+- 📄 **Technical Architecture & Submission Note:** [`SUBMISSION_NOTE.md`](./SUBMISSION_NOTE.md)
+
+---
+
 ## 🌟 Features
 
 - 🎙️ **Two-Way Voice Conversation:** Uses the browser's native **Web Speech API** (`SpeechRecognition` for STT and `SpeechSynthesis` for TTS) with zero external telephony or audio API costs.
